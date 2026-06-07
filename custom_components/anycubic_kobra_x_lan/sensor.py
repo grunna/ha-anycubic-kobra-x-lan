@@ -71,9 +71,31 @@ SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
     ),
     AnycubicSensorEntityDescription(
+        key="aux_fan_speed",
+        name="Aux fan speed",
+        value_fn=lambda data: _payload(data, "info").get("aux_fan_speed_pct"),
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_speed_mode",
+        name="Print speed mode",
+        value_fn=lambda data: _payload(data, "info").get("print_speed_mode"),
+    ),
+    AnycubicSensorEntityDescription(
         key="firmware_version",
         name="Firmware version",
         value_fn=lambda data: _payload(data, "info").get("version"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="camera_stream_url",
+        name="Camera stream URL",
+        value_fn=lambda data: _urls(data).get("rtspUrl"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="file_upload_url",
+        name="File upload URL",
+        value_fn=lambda data: _urls(data).get("fileUploadurl"),
     ),
 )
 
@@ -149,5 +171,15 @@ def _temperature(data: dict[str, Any]) -> dict[str, Any]:
 
     if isinstance(temp, dict):
         return temp
+
+    return {}
+
+
+def _urls(data: dict[str, Any]) -> dict[str, Any]:
+    info = _payload(data, "info")
+    urls = info.get("urls")
+
+    if isinstance(urls, dict):
+        return urls
 
     return {}
