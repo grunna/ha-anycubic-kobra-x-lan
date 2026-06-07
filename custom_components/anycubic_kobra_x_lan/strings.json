@@ -3,19 +3,34 @@
     "step": {
       "user": {
         "title": "Anycubic Kobra X LAN",
-        "description": "Enter the IP address of your Anycubic Kobra X printer.",
+        "description": "Enter the IP address of your Anycubic Kobra X printer. The integration will test the connection before saving.",
         "data": {
           "host": "Printer IP address"
         }
+      },
+      "confirm": {
+        "title": "Confirm printer",
+        "description": "Printer found:\n\nName: {name}\nModel: {model}\nIP address: {ip}\nDevice ID: {device_id}\n\nDo you want to add this printer to Home Assistant?"
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to the printer",
-      "unknown": "Unexpected error",
-      "auth_failed": "Could not authenticate with the printer"
+      "cannot_connect": "Could not connect to the printer. Check that the printer is turned on, LAN mode is enabled, and the IP address is correct.",
+      "auth_failed": "Could not authenticate with the printer.",
+      "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "This printer is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Anycubic Kobra X LAN options",
+        "description": "Choose how often Home Assistant should ask the printer for updated data.",
+        "data": {
+          "polling_interval": "Polling interval in seconds"
+        }
+      }
     }
   }
 }

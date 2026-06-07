@@ -16,18 +16,23 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, QUERY_TYPES
+from .const import CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL, DOMAIN, QUERY_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        polling_interval = entry.options.get(
+            CONF_POLLING_INTERVAL,
+            DEFAULT_POLLING_INTERVAL,
+        )
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),
+            update_interval=timedelta(seconds=polling_interval),
         )
         self.entry = entry
         self.credentials: dict[str, Any] = entry.data["credentials"]
