@@ -1,0 +1,11 @@
+refresh_data:
+  name: Refresh printer data
+  description: Ask the printer for updated status information now.
+  target:
+    entity:
+      integration: anycubic_kobra_x_lan
+      domain:
+        - sensor
+        - binary_sensor
+        - camera
+        - button
