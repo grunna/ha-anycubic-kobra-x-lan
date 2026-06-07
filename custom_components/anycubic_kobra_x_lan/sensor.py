@@ -22,6 +22,7 @@ from .coordinator import AnycubicKobraXLanCoordinator
 @dataclass(frozen=True, kw_only=True)
 class AnycubicSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], Any]
+    attr_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
@@ -30,6 +31,22 @@ SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
         name="Printer state",
         value_fn=lambda data: _payload(data, "status").get("state")
         or _payload(data, "info").get("state"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="model",
+        name="Model",
+        value_fn=lambda data: _payload(data, "info").get("model"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="ip",
+        name="IP address",
+        value_fn=lambda data: _payload(data, "info").get("ip"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="features",
+        name="Features",
+        value_fn=lambda data: _enabled_feature_count(data),
+        attr_fn=lambda data: _features(data),
     ),
     AnycubicSensorEntityDescription(
         key="nozzle_temperature",
@@ -88,14 +105,34 @@ SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
         value_fn=lambda data: _payload(data, "info").get("version"),
     ),
     AnycubicSensorEntityDescription(
-        key="camera_stream_url",
-        name="Camera stream URL",
-        value_fn=lambda data: _urls(data).get("rtspUrl"),
+        key="multi_color_box_status",
+        name="Multi color box status",
+        value_fn=lambda data: _multi_color_box(data).get("status"),
     ),
     AnycubicSensorEntityDescription(
-        key="file_upload_url",
-        name="File upload URL",
-        value_fn=lambda data: _urls(data).get("fileUploadurl"),
+        key="loaded_slot",
+        name="Loaded slot",
+        value_fn=lambda data: _multi_color_box(data).get("loaded_slot"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="slot_1_material",
+        name="Slot 1 material",
+        value_fn=lambda data: _slot(data, 0).get("type"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="slot_2_material",
+        name="Slot 2 material",
+        value_fn=lambda data: _slot(data, 1).get("type"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="slot_3_material",
+        name="Slot 3 material",
+        value_fn=lambda data: _slot(data, 2).get("type"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="slot_4_material",
+        name="Slot 4 material",
+        value_fn=lambda data: _slot(data, 3).get("type"),
     ),
 )
 
@@ -145,6 +182,14 @@ class AnycubicKobraXLanSensor(
 
         return self.entity_description.value_fn(self.coordinator.data)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if not self.coordinator.data or self.entity_description.attr_fn is None:
+            return None
+
+        attributes = self.entity_description.attr_fn(self.coordinator.data)
+        return attributes or None
+
 
 def _payload(data: dict[str, Any], query_type: str) -> dict[str, Any]:
     report = data.get(query_type)
@@ -175,11 +220,47 @@ def _temperature(data: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _urls(data: dict[str, Any]) -> dict[str, Any]:
-    info = _payload(data, "info")
-    urls = info.get("urls")
+def _features(data: dict[str, Any]) -> dict[str, Any]:
+    features = _payload(data, "info").get("features")
 
-    if isinstance(urls, dict):
-        return urls
+    if isinstance(features, dict):
+        return features
+
+    return {}
+
+
+def _enabled_feature_count(data: dict[str, Any]) -> int | None:
+    features = _features(data)
+
+    if not features:
+        return None
+
+    return sum(1 for value in features.values() if value is True)
+
+
+def _multi_color_box(data: dict[str, Any]) -> dict[str, Any]:
+    payload = _payload(data, "multiColorBox")
+    boxes = payload.get("multi_color_box")
+
+    if isinstance(boxes, list) and boxes and isinstance(boxes[0], dict):
+        return boxes[0]
+
+    return {}
+
+
+def _slot(data: dict[str, Any], index: int) -> dict[str, Any]:
+    box = _multi_color_box(data)
+    slots = box.get("slots")
+
+    if not isinstance(slots, list):
+        return {}
+
+    if index < 0 or index >= len(slots):
+        return {}
+
+    slot = slots[index]
+
+    if isinstance(slot, dict):
+        return slot
 
     return {}

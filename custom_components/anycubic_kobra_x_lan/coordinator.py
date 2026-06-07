@@ -5,6 +5,7 @@ import logging
 import socket
 import ssl
 import struct
+import threading
 import time
 import uuid
 from datetime import timedelta
@@ -17,7 +18,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DOMAIN, QUERY_TYPES
 
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -25,27 +25,47 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
             hass,
-            logger=_LOGGER,
+            _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=30),
         )
         self.entry = entry
         self.credentials: dict[str, Any] = entry.data["credentials"]
+        self._mqtt = _PersistentRawMqttClient(
+            self.credentials,
+            self._handle_report_from_thread,
+        )
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            return await self.hass.async_add_executor_job(self._query_all)
+            return await self.hass.async_add_executor_job(self._mqtt.query_all_and_wait)
         except Exception as err:
             raise UpdateFailed(str(err)) from err
 
-    def _query_all(self) -> dict[str, Any]:
-        mqtt = _RawMqttClient(self.credentials)
-        return mqtt.query_all()
+    async def async_shutdown(self) -> None:
+        await self.hass.async_add_executor_job(self._mqtt.stop)
+
+    def _handle_report_from_thread(self, report_type: str, payload: dict[str, Any]) -> None:
+        self.hass.loop.call_soon_threadsafe(
+            self._handle_report_on_loop,
+            report_type,
+            payload,
+        )
+
+    def _handle_report_on_loop(self, report_type: str, payload: dict[str, Any]) -> None:
+        new_data = dict(self.data or {})
+        new_data[report_type] = payload
+        self.async_set_updated_data(new_data)
 
 
-class _RawMqttClient:
-    def __init__(self, credentials: dict[str, Any]) -> None:
+class _PersistentRawMqttClient:
+    def __init__(
+        self,
+        credentials: dict[str, Any],
+        on_report,
+    ) -> None:
         self.credentials = credentials
+        self.on_report = on_report
 
         parsed = urlparse(credentials["broker"])
         self.host = parsed.hostname or credentials["ip"]
@@ -56,65 +76,166 @@ class _RawMqttClient:
         self.device_id = credentials["deviceId"]
         self.mode_id = str(credentials.get("modeId") or credentials.get("modelId"))
 
-    def query_all(self) -> dict[str, Any]:
-        subscribe_topic = f"anycubic/anycubicCloud/v1/printer/+/{self.mode_id}/{self.device_id}/#"
-        client_id = f"ha_readonly_{self.device_id[-8:]}"
+        self.subscribe_topic = f"anycubic/anycubicCloud/v1/printer/+/{self.mode_id}/{self.device_id}/#"
+        self.client_id = f"ha_anycubic_{self.device_id[-8:]}"
 
-        data: dict[str, Any] = {}
+        self._lock = threading.RLock()
+        self._latest_lock = threading.RLock()
+        self._latest: dict[str, Any] = {}
+
+        self._sock = None
+        self._stop_event = threading.Event()
+        self._reader_thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        with self._lock:
+            if self._reader_thread and self._reader_thread.is_alive():
+                return
+
+            self._stop_event.clear()
+            self._reader_thread = threading.Thread(
+                target=self._reader_loop,
+                name="anycubic-kobra-x-lan-mqtt",
+                daemon=True,
+            )
+            self._reader_thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+        with self._lock:
+            self._close_locked()
+
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=5)
+
+    def query_all_and_wait(self) -> dict[str, Any]:
+        self.start()
+        self._ensure_connected()
+
+        expected = set(QUERY_TYPES)
+
+        for query_type in QUERY_TYPES:
+            self._publish_query(query_type)
+
+        end_time = time.monotonic() + 8
+
+        while time.monotonic() < end_time:
+            with self._latest_lock:
+                if expected.issubset(self._latest.keys()):
+                    return dict(self._latest)
+
+            time.sleep(0.1)
+
+        with self._latest_lock:
+            return dict(self._latest)
+
+    def _reader_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self._ensure_connected()
+
+                with self._lock:
+                    sock = self._sock
+
+                if sock is None:
+                    time.sleep(1)
+                    continue
+
+                try:
+                    packet_type, body = _read_packet(sock)
+                except (TimeoutError, socket.timeout):
+                    continue
+
+                if packet_type is None:
+                    self._mark_disconnected()
+                    continue
+
+                if (packet_type & 0xF0) != 0x30:
+                    continue
+
+                topic, payload = _decode_publish(body)
+
+                if not isinstance(payload, dict):
+                    continue
+
+                report_type = payload.get("type")
+
+                if not report_type:
+                    report_type = _type_from_topic(topic)
+
+                if not report_type:
+                    continue
+
+                with self._latest_lock:
+                    self._latest[report_type] = payload
+
+                self.on_report(report_type, payload)
+            except Exception as err:
+                _LOGGER.debug("MQTT reader error, reconnecting: %s", err)
+                self._mark_disconnected()
+                time.sleep(2)
+
+    def _publish_query(self, query_type: str) -> None:
+        publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/{query_type}"
+        payload = _build_query_payload(query_type)
+
+        with self._lock:
+            self._ensure_connected_locked()
+
+            if self._sock is None:
+                raise RuntimeError("MQTT socket is not connected")
+
+            self._sock.sendall(_publish_packet(publish_topic, payload))
+
+    def _ensure_connected(self) -> None:
+        with self._lock:
+            self._ensure_connected_locked()
+
+    def _ensure_connected_locked(self) -> None:
+        if self._sock is not None:
+            return
 
         context = ssl._create_unverified_context()
 
-        with socket.create_connection((self.host, self.port), timeout=10) as raw:
-            with context.wrap_socket(raw, server_hostname=self.host) as sock:
-                sock.sendall(_connect_packet(client_id, self.username, self.password))
-                packet_type, body = _read_packet(sock)
+        raw = socket.create_connection((self.host, self.port), timeout=10)
+        sock = context.wrap_socket(raw, server_hostname=self.host)
+        sock.settimeout(10)
 
-                if packet_type != 0x20 or len(body) < 2 or body[1] != 0:
-                    raise RuntimeError(f"MQTT connection rejected: {body.hex()}")
+        try:
+            sock.sendall(_connect_packet(self.client_id, self.username, self.password))
+            packet_type, body = _read_packet(sock)
 
-                sock.sendall(_subscribe_packet(subscribe_topic))
-                packet_type, body = _read_packet(sock)
+            if packet_type != 0x20 or len(body) < 2 or body[1] != 0:
+                raise RuntimeError(f"MQTT connection rejected: {body.hex()}")
 
-                if packet_type != 0x90:
-                    raise RuntimeError(f"MQTT subscribe failed: packet={packet_type!r}, body={body.hex()}")
+            sock.sendall(_subscribe_packet(self.subscribe_topic))
+            packet_type, body = _read_packet(sock)
 
-                expected = set(QUERY_TYPES)
+            if packet_type != 0x90:
+                raise RuntimeError(f"MQTT subscribe failed: packet={packet_type!r}, body={body.hex()}")
 
-                for query_type in QUERY_TYPES:
-                    publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/{query_type}"
-                    sock.sendall(_publish_packet(publish_topic, _build_query_payload(query_type)))
+            sock.settimeout(1)
+            self._sock = sock
+            _LOGGER.debug("Connected to Anycubic LAN MQTT broker")
+        except Exception:
+            try:
+                sock.close()
+            finally:
+                raise
 
-                sock.settimeout(8)
+    def _mark_disconnected(self) -> None:
+        with self._lock:
+            self._close_locked()
 
-                end_time = time.monotonic() + 8
-
-                while time.monotonic() < end_time and expected:
-                    try:
-                        packet_type, body = _read_packet(sock)
-                    except TimeoutError:
-                        break
-
-                    if packet_type is None:
-                        break
-
-                    if (packet_type & 0xF0) != 0x30:
-                        continue
-
-                    topic, payload = _decode_publish(body)
-
-                    if not isinstance(payload, dict):
-                        continue
-
-                    report_type = payload.get("type")
-
-                    if not report_type:
-                        report_type = _type_from_topic(topic)
-
-                    if report_type in expected:
-                        data[report_type] = payload
-                        expected.remove(report_type)
-
-        return data
+    def _close_locked(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            finally:
+                self._sock = None
 
 
 def _enc_str(value: bytes) -> bytes:
