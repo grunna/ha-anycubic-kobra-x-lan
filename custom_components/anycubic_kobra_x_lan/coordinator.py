@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import ssl
 import struct
@@ -17,11 +18,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import DOMAIN, QUERY_TYPES
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
             hass,
-            logger=None,
+            logger=_LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=30),
         )
