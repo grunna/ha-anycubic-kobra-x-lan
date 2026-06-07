@@ -5,7 +5,7 @@ CONF_PC_DEVICE_ID = "pc_device_id"
 
 DEFAULT_NAME = "Anycubic Kobra X LAN"
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "camera"]
 
 QUERY_TYPES = [
     "status",
