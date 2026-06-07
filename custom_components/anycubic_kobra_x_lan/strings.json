@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Anycubic Kobra X LAN",
+        "description": "Enter the IP address of your Anycubic Kobra X printer.",
+        "data": {
+          "host": "Printer IP address"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the printer",
+      "unknown": "Unexpected error",
+      "auth_failed": "Could not authenticate with the printer"
+    },
+    "abort": {
+      "already_configured": "This printer is already configured"
+    }
+  }
+}
