@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+    BinarySensorEntityDescription,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -13,28 +17,25 @@ from .const import DOMAIN
 from .coordinator import AnycubicKobraXLanCoordinator
 
 
-@dataclass(frozen=True)
-class AnycubicBinarySensorDescription:
-    key: str
-    name: str
+@dataclass(frozen=True, kw_only=True)
+class AnycubicBinarySensorEntityDescription(BinarySensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], bool | None]
-    device_class: BinarySensorDeviceClass | None = None
 
 
-BINARY_SENSORS: tuple[AnycubicBinarySensorDescription, ...] = (
-    AnycubicBinarySensorDescription(
+BINARY_SENSORS: tuple[AnycubicBinarySensorEntityDescription, ...] = (
+    AnycubicBinarySensorEntityDescription(
         key="camera_available",
         name="Camera available",
         value_fn=lambda data: _as_bool(_payload(data, "peripherie").get("camera")),
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
     ),
-    AnycubicBinarySensorDescription(
+    AnycubicBinarySensorEntityDescription(
         key="usb_available",
         name="USB available",
         value_fn=lambda data: _as_bool(_payload(data, "peripherie").get("udisk")),
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
     ),
-    AnycubicBinarySensorDescription(
+    AnycubicBinarySensorEntityDescription(
         key="multi_color_box_available",
         name="Multi color box available",
         value_fn=lambda data: _as_bool(_payload(data, "peripherie").get("multiColorBox")),
@@ -60,19 +61,19 @@ class AnycubicKobraXLanBinarySensor(
     CoordinatorEntity[AnycubicKobraXLanCoordinator],
     BinarySensorEntity,
 ):
+    entity_description: AnycubicBinarySensorEntityDescription
+
     def __init__(
         self,
         coordinator: AnycubicKobraXLanCoordinator,
         entry: ConfigEntry,
-        description: AnycubicBinarySensorDescription,
+        description: AnycubicBinarySensorEntityDescription,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_translation_key = description.key
         self._attr_has_entity_name = True
-        self._attr_name = description.name
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},
             "name": coordinator.credentials.get("modelName", "Anycubic Kobra X"),
@@ -86,10 +87,6 @@ class AnycubicKobraXLanBinarySensor(
             return None
 
         return self.entity_description.value_fn(self.coordinator.data)
-
-    @property
-    def device_class(self) -> BinarySensorDeviceClass | None:
-        return self.entity_description.device_class
 
 
 def _payload(data: dict[str, Any], query_type: str) -> dict[str, Any]:

@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -14,24 +19,19 @@ from .const import DOMAIN
 from .coordinator import AnycubicKobraXLanCoordinator
 
 
-@dataclass(frozen=True)
-class AnycubicSensorDescription:
-    key: str
-    name: str
+@dataclass(frozen=True, kw_only=True)
+class AnycubicSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], Any]
-    device_class: SensorDeviceClass | None = None
-    native_unit_of_measurement: str | None = None
-    state_class: SensorStateClass | None = None
 
 
-SENSORS: tuple[AnycubicSensorDescription, ...] = (
-    AnycubicSensorDescription(
+SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
+    AnycubicSensorEntityDescription(
         key="printer_state",
         name="Printer state",
         value_fn=lambda data: _payload(data, "status").get("state")
         or _payload(data, "info").get("state"),
     ),
-    AnycubicSensorDescription(
+    AnycubicSensorEntityDescription(
         key="nozzle_temperature",
         name="Nozzle temperature",
         value_fn=lambda data: _temperature(data).get("curr_nozzle_temp"),
@@ -39,7 +39,7 @@ SENSORS: tuple[AnycubicSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    AnycubicSensorDescription(
+    AnycubicSensorEntityDescription(
         key="bed_temperature",
         name="Bed temperature",
         value_fn=lambda data: _temperature(data).get("curr_hotbed_temp"),
@@ -47,7 +47,7 @@ SENSORS: tuple[AnycubicSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    AnycubicSensorDescription(
+    AnycubicSensorEntityDescription(
         key="target_nozzle_temperature",
         name="Target nozzle temperature",
         value_fn=lambda data: _temperature(data).get("target_nozzle_temp"),
@@ -55,7 +55,7 @@ SENSORS: tuple[AnycubicSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    AnycubicSensorDescription(
+    AnycubicSensorEntityDescription(
         key="target_bed_temperature",
         name="Target bed temperature",
         value_fn=lambda data: _temperature(data).get("target_hotbed_temp"),
@@ -63,14 +63,14 @@ SENSORS: tuple[AnycubicSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    AnycubicSensorDescription(
+    AnycubicSensorEntityDescription(
         key="fan_speed",
         name="Fan speed",
         value_fn=lambda data: _payload(data, "fan").get("fan_speed_pct"),
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    AnycubicSensorDescription(
+    AnycubicSensorEntityDescription(
         key="firmware_version",
         name="Firmware version",
         value_fn=lambda data: _payload(data, "info").get("version"),
@@ -91,20 +91,23 @@ async def async_setup_entry(
     )
 
 
-class AnycubicKobraXLanSensor(CoordinatorEntity[AnycubicKobraXLanCoordinator], SensorEntity):
+class AnycubicKobraXLanSensor(
+    CoordinatorEntity[AnycubicKobraXLanCoordinator],
+    SensorEntity,
+):
+    entity_description: AnycubicSensorEntityDescription
+
     def __init__(
         self,
         coordinator: AnycubicKobraXLanCoordinator,
         entry: ConfigEntry,
-        description: AnycubicSensorDescription,
+        description: AnycubicSensorEntityDescription,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_translation_key = description.key
         self._attr_has_entity_name = True
-        self._attr_name = description.name
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},
             "name": coordinator.credentials.get("modelName", "Anycubic Kobra X"),
@@ -119,18 +122,6 @@ class AnycubicKobraXLanSensor(CoordinatorEntity[AnycubicKobraXLanCoordinator], S
             return None
 
         return self.entity_description.value_fn(self.coordinator.data)
-
-    @property
-    def device_class(self) -> SensorDeviceClass | None:
-        return self.entity_description.device_class
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        return self.entity_description.native_unit_of_measurement
-
-    @property
-    def state_class(self) -> SensorStateClass | None:
-        return self.entity_description.state_class
 
 
 def _payload(data: dict[str, Any], query_type: str) -> dict[str, Any]:
