@@ -50,6 +50,19 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_shutdown(self) -> None:
         await self.hass.async_add_executor_job(self._mqtt.stop)
 
+    async def async_set_light(
+        self,
+        light_type: int,
+        status: int,
+        brightness: int,
+    ) -> None:
+        await self.hass.async_add_executor_job(
+            self._mqtt.set_light,
+            light_type,
+            status,
+            brightness,
+        )
+
     def _handle_report_from_thread(self, report_type: str, payload: dict[str, Any]) -> None:
         self.hass.loop.call_soon_threadsafe(
             self._handle_report_on_loop,
@@ -180,6 +193,23 @@ class _PersistentRawMqttClient:
                 _LOGGER.debug("MQTT reader error, reconnecting: %s", err)
                 self._mark_disconnected()
                 time.sleep(2)
+
+    def set_light(
+        self,
+        light_type: int,
+        status: int,
+        brightness: int,
+    ) -> None:
+        publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/light"
+        payload = _build_light_control_payload(light_type, status, brightness)
+
+        with self._lock:
+            self._ensure_connected_locked()
+
+            if self._sock is None:
+                raise RuntimeError("MQTT socket is not connected")
+
+            self._sock.sendall(_publish_packet(publish_topic, payload))
 
     def _publish_query(self, query_type: str) -> None:
         publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/{query_type}"
@@ -348,6 +378,24 @@ def _build_query_payload(query_type: str) -> dict[str, Any]:
         "timestamp": int(time.time() * 1000),
         "msgid": str(uuid.uuid4()),
         "data": None,
+    }
+
+
+def _build_light_control_payload(
+    light_type: int,
+    status: int,
+    brightness: int,
+) -> dict[str, Any]:
+    return {
+        "type": "light",
+        "action": "control",
+        "timestamp": int(time.time() * 1000),
+        "msgid": str(uuid.uuid4()),
+        "data": {
+            "type": light_type,
+            "status": status,
+            "brightness": brightness,
+        },
     }
 
 
