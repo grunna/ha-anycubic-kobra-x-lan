@@ -219,12 +219,84 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _handle_report_on_loop(self, report_type: str, payload: dict[str, Any]) -> None:
         new_data = dict(self.data or {})
-        new_data[report_type] = payload
+
+        if report_type == "light" or payload.get("type") == "light":
+            self._update_light_state(new_data, payload)
+        else:
+            new_data[report_type] = payload
 
         if report_type == "video" or payload.get("type") == "video":
             self._update_camera_stream_state(new_data, payload)
 
         self.async_set_updated_data(new_data)
+
+    def _update_light_state(
+        self,
+        data: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        payload_data = payload.get("data")
+
+        if not isinstance(payload_data, dict):
+            data["light"] = payload
+            return
+
+        if isinstance(payload_data.get("lights"), list):
+            data["light"] = payload
+            return
+
+        light_type = payload_data.get("type")
+
+        if light_type is None:
+            data["light"] = payload
+            return
+
+        light_report = dict(data.get("light") or {})
+        light_report["type"] = "light"
+        light_report["action"] = payload.get("action", "control")
+
+        light_data = light_report.get("data")
+
+        if isinstance(light_data, dict):
+            light_data = dict(light_data)
+        else:
+            light_data = {}
+
+        lights = light_data.get("lights")
+
+        if isinstance(lights, list):
+            lights = [
+                dict(item) if isinstance(item, dict) else item
+                for item in lights
+            ]
+        else:
+            lights = []
+
+        found = False
+
+        for item in lights:
+            if not isinstance(item, dict):
+                continue
+
+            if str(item.get("type")) == str(light_type):
+                item["type"] = light_type
+                item["status"] = payload_data.get("status")
+                item["brightness"] = payload_data.get("brightness")
+                found = True
+                break
+
+        if not found:
+            lights.append(
+                {
+                    "type": light_type,
+                    "status": payload_data.get("status"),
+                    "brightness": payload_data.get("brightness"),
+                }
+            )
+
+        light_data["lights"] = lights
+        light_report["data"] = light_data
+        data["light"] = light_report
 
     def _update_camera_stream_state(
         self,
