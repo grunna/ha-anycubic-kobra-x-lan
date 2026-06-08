@@ -11,6 +11,7 @@ from .coordinator import AnycubicKobraXLanCoordinator
 
 
 SERVICE_REFRESH_DATA = "refresh_data"
+SERVICE_RECONNECT = "reconnect"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -42,6 +43,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_REFRESH_DATA)
+            hass.services.async_remove(DOMAIN, SERVICE_RECONNECT)
 
     return unload_ok
 
@@ -51,10 +53,41 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
-    if hass.services.has_service(DOMAIN, SERVICE_REFRESH_DATA):
-        return
+    if not hass.services.has_service(DOMAIN, SERVICE_REFRESH_DATA):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_REFRESH_DATA,
+            _make_coordinator_service_handler(
+                hass,
+                lambda coordinator: coordinator.async_request_refresh(),
+            ),
+            schema=_SERVICE_SCHEMA,
+        )
 
-    async def async_refresh_data(call: ServiceCall) -> None:
+    if not hass.services.has_service(DOMAIN, SERVICE_RECONNECT):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_RECONNECT,
+            _make_coordinator_service_handler(
+                hass,
+                lambda coordinator: coordinator.async_reconnect(),
+            ),
+            schema=_SERVICE_SCHEMA,
+        )
+
+
+_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): cv.string,
+    }
+)
+
+
+def _make_coordinator_service_handler(
+    hass: HomeAssistant,
+    action,
+):
+    async def async_handle_service(call: ServiceCall) -> None:
         entry_id = call.data.get("entry_id")
 
         coordinators: list[AnycubicKobraXLanCoordinator] = []
@@ -68,15 +101,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
             coordinators.extend(hass.data.get(DOMAIN, {}).values())
 
         for coordinator in coordinators:
-            await coordinator.async_request_refresh()
+            await action(coordinator)
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REFRESH_DATA,
-        async_refresh_data,
-        schema=vol.Schema(
-            {
-                vol.Optional("entry_id"): cv.string,
-            }
-        ),
-    )
+    return async_handle_service

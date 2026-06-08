@@ -9,7 +9,7 @@ DEFAULT_POLLING_INTERVAL = 30
 MIN_POLLING_INTERVAL = 10
 MAX_POLLING_INTERVAL = 3600
 
-PLATFORMS = ["sensor", "binary_sensor", "camera", "button", "light"]
+PLATFORMS = ["sensor", "binary_sensor", "camera", "button", "light", "switch"]
 
 QUERY_TYPES = [
     "status",

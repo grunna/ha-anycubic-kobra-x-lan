@@ -50,6 +50,10 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_shutdown(self) -> None:
         await self.hass.async_add_executor_job(self._mqtt.stop)
 
+    async def async_reconnect(self) -> None:
+        await self.hass.async_add_executor_job(self._mqtt.reconnect)
+        await self.async_request_refresh()
+
     async def async_set_light(
         self,
         light_type: int,
@@ -62,6 +66,22 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             status,
             brightness,
         )
+
+    async def async_set_camera_stream(self, enabled: bool) -> None:
+        action = "startCapture" if enabled else "stopCapture"
+
+        await self.hass.async_add_executor_job(
+            self._mqtt.set_camera_stream,
+            action,
+        )
+
+        new_data = dict(self.data or {})
+        camera_stream = dict(new_data.get("camera_stream") or {})
+        camera_stream["enabled"] = enabled
+        camera_stream["last_action"] = action
+        camera_stream["optimistic"] = True
+        new_data["camera_stream"] = camera_stream
+        self.async_set_updated_data(new_data)
 
     def _handle_report_from_thread(self, report_type: str, payload: dict[str, Any]) -> None:
         self.hass.loop.call_soon_threadsafe(
@@ -126,6 +146,11 @@ class _PersistentRawMqttClient:
 
         if self._reader_thread and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=5)
+
+    def reconnect(self) -> None:
+        with self._lock:
+            self._close_locked()
+            self._ensure_connected_locked()
 
     def query_all_and_wait(self) -> dict[str, Any]:
         self.start()
@@ -202,6 +227,18 @@ class _PersistentRawMqttClient:
     ) -> None:
         publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/light"
         payload = _build_light_control_payload(light_type, status, brightness)
+
+        with self._lock:
+            self._ensure_connected_locked()
+
+            if self._sock is None:
+                raise RuntimeError("MQTT socket is not connected")
+
+            self._sock.sendall(_publish_packet(publish_topic, payload))
+
+    def set_camera_stream(self, action: str) -> None:
+        publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/video"
+        payload = _build_video_capture_payload(action)
 
         with self._lock:
             self._ensure_connected_locked()
@@ -396,6 +433,16 @@ def _build_light_control_payload(
             "status": status,
             "brightness": brightness,
         },
+    }
+
+
+def _build_video_capture_payload(action: str) -> dict[str, Any]:
+    return {
+        "type": "video",
+        "action": action,
+        "timestamp": int(time.time() * 1000),
+        "msgid": str(uuid.uuid4()),
+        "data": None,
     }
 
 

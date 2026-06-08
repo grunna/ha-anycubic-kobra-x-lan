@@ -1,11 +1,21 @@
 refresh_data:
   name: Refresh printer data
   description: Ask the printer for updated status information now.
-  target:
-    entity:
-      integration: anycubic_kobra_x_lan
-      domain:
-        - sensor
-        - binary_sensor
-        - camera
-        - button
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID. If omitted, all configured Anycubic printers are refreshed.
+      required: false
+      selector:
+        text:
+
+reconnect:
+  name: Reconnect LAN connection
+  description: Close and reopen the local MQTT connection to the printer.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID. If omitted, all configured Anycubic printers reconnect.
+      required: false
+      selector:
+        text:
