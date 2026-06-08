@@ -147,3 +147,16 @@ MIT License
 This project is unofficial and not affiliated with Anycubic.
 
 Use at your own risk. Printer firmware and local protocols may change over time.
+
+
+## Research and protocol notes
+
+This Home Assistant integration is kept focused on the actual HACS implementation.
+
+The reverse engineering notes, protocol research, test scripts, and technical explanations are kept in a separate research repository:
+
+[anycubic-kobra-x-lan research repository](YOUR_GITLAB_REPOSITORY_URL_HERE)
+
+That repository contains more details about how the local LAN communication works, including MQTT topics, payloads, credential discovery, camera handling, and other protocol notes.
+
+You do not need the research repository to use this integration. It is mainly intended for developers, contributors, and anyone who wants to understand or verify how the integration communicates with the printer.
