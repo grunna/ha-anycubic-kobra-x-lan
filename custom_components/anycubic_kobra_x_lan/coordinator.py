@@ -83,6 +83,36 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         new_data["camera_stream"] = camera_stream
         self.async_set_updated_data(new_data)
 
+    async def async_set_target_temperature(
+        self,
+        setting_key: str,
+        temperature: int,
+    ) -> None:
+        task_id = _task_id(self.data or {})
+        settings = {
+            setting_key: int(temperature),
+        }
+
+        await self.hass.async_add_executor_job(
+            self._mqtt.set_print_settings,
+            task_id,
+            settings,
+        )
+
+        new_data = dict(self.data or {})
+        tempature = dict(new_data.get("tempature") or {})
+        temp_data = tempature.get("data")
+
+        if isinstance(temp_data, dict):
+            temp_data = dict(temp_data)
+            temp_data[setting_key] = int(temperature)
+            tempature["data"] = temp_data
+        else:
+            tempature[setting_key] = int(temperature)
+
+        new_data["tempature"] = tempature
+        self.async_set_updated_data(new_data)
+
     def _handle_report_from_thread(self, report_type: str, payload: dict[str, Any]) -> None:
         self.hass.loop.call_soon_threadsafe(
             self._handle_report_on_loop,
@@ -276,6 +306,22 @@ class _PersistentRawMqttClient:
     def set_camera_stream(self, action: str) -> None:
         publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/video"
         payload = _build_video_capture_payload(action)
+
+        with self._lock:
+            self._ensure_connected_locked()
+
+            if self._sock is None:
+                raise RuntimeError("MQTT socket is not connected")
+
+            self._sock.sendall(_publish_packet(publish_topic, payload))
+
+    def set_print_settings(
+        self,
+        task_id: str,
+        settings: dict[str, Any],
+    ) -> None:
+        publish_topic = f"anycubic/anycubicCloud/v1/web/printer/{self.mode_id}/{self.device_id}/print"
+        payload = _build_print_update_payload(task_id, settings)
 
         with self._lock:
             self._ensure_connected_locked()
@@ -481,6 +527,48 @@ def _build_video_capture_payload(action: str) -> dict[str, Any]:
         "msgid": str(uuid.uuid4()),
         "data": None,
     }
+
+
+def _build_print_update_payload(
+    task_id: str,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "type": "print",
+        "action": "update",
+        "timestamp": int(time.time() * 1000),
+        "msgid": str(uuid.uuid4()),
+        "data": {
+            "taskid": str(task_id or ""),
+            "settings": settings,
+        },
+    }
+
+
+def _task_id(data: dict[str, Any]) -> str:
+    info = data.get("info")
+
+    if isinstance(info, dict):
+        payload = info.get("data")
+
+        if isinstance(payload, dict):
+            project = payload.get("project")
+
+            if isinstance(project, dict):
+                task_id = project.get("task_id")
+
+                if task_id is not None:
+                    return str(task_id)
+
+        project = info.get("project")
+
+        if isinstance(project, dict):
+            task_id = project.get("task_id")
+
+            if task_id is not None:
+                return str(task_id)
+
+    return ""
 
 
 def _decode_publish(body: bytes):
