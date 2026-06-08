@@ -329,13 +329,23 @@ class _PersistentRawMqttClient:
 
         while time.monotonic() < end_time:
             with self._latest_lock:
-                if expected.issubset(self._latest.keys()):
-                    return dict(self._latest)
+                query_data = {
+                    key: value
+                    for key, value in self._latest.items()
+                    if key in expected
+                }
+
+                if expected.issubset(query_data.keys()):
+                    return query_data
 
             time.sleep(0.1)
 
         with self._latest_lock:
-            return dict(self._latest)
+            return {
+                key: value
+                for key, value in self._latest.items()
+                if key in expected
+            }
 
     def _reader_loop(self) -> None:
         while not self._stop_event.is_set():
