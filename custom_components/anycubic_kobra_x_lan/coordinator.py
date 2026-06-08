@@ -88,9 +88,16 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         setting_key: str,
         temperature: int,
     ) -> None:
+        await self.async_set_print_setting(setting_key, int(temperature))
+
+    async def async_set_print_setting(
+        self,
+        setting_key: str,
+        value: int,
+    ) -> None:
         task_id = _task_id(self.data or {})
         settings = {
-            setting_key: int(temperature),
+            setting_key: int(value),
         }
 
         await self.hass.async_add_executor_job(
@@ -100,17 +107,32 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         new_data = dict(self.data or {})
-        tempature = dict(new_data.get("tempature") or {})
-        temp_data = tempature.get("data")
 
-        if isinstance(temp_data, dict):
-            temp_data = dict(temp_data)
-            temp_data[setting_key] = int(temperature)
-            tempature["data"] = temp_data
-        else:
-            tempature[setting_key] = int(temperature)
+        if setting_key in ("target_hotbed_temp", "target_nozzle_temp"):
+            tempature = dict(new_data.get("tempature") or {})
+            temp_data = tempature.get("data")
 
-        new_data["tempature"] = tempature
+            if isinstance(temp_data, dict):
+                temp_data = dict(temp_data)
+                temp_data[setting_key] = int(value)
+                tempature["data"] = temp_data
+            else:
+                tempature[setting_key] = int(value)
+
+            new_data["tempature"] = tempature
+        elif setting_key in ("fan_speed_pct", "aux_fan_speed_pct", "box_fan_level"):
+            fan = dict(new_data.get("fan") or {})
+            fan_data = fan.get("data")
+
+            if isinstance(fan_data, dict):
+                fan_data = dict(fan_data)
+                fan_data[setting_key] = int(value)
+                fan["data"] = fan_data
+            else:
+                fan[setting_key] = int(value)
+
+            new_data["fan"] = fan
+
         self.async_set_updated_data(new_data)
 
     def _handle_report_from_thread(self, report_type: str, payload: dict[str, Any]) -> None:
