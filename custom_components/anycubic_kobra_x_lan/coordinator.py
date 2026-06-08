@@ -44,9 +44,24 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            return await self.hass.async_add_executor_job(self._mqtt.query_all_and_wait)
+            data = await self.hass.async_add_executor_job(self._mqtt.query_all_and_wait)
         except Exception as err:
             raise UpdateFailed(str(err)) from err
+
+        previous_data = self.data or {}
+
+        video = data.get("video")
+
+        if isinstance(video, dict):
+            self._update_camera_stream_state(data, video)
+        else:
+            if "camera_stream" in previous_data:
+                data["camera_stream"] = previous_data["camera_stream"]
+
+            if "video" in previous_data:
+                data["video"] = previous_data["video"]
+
+        return data
 
     async def async_shutdown(self) -> None:
         await self.hass.async_add_executor_job(self._mqtt.stop)
@@ -67,6 +82,51 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             status,
             brightness,
         )
+
+        new_data = dict(self.data or {})
+        light_report = dict(new_data.get("light") or {})
+        light_data = light_report.get("data")
+
+        if isinstance(light_data, dict):
+            light_data = dict(light_data)
+        else:
+            light_data = {}
+
+        lights = light_data.get("lights")
+
+        if isinstance(lights, list):
+            lights = [
+                dict(item) if isinstance(item, dict) else item
+                for item in lights
+            ]
+        else:
+            lights = []
+
+        found = False
+
+        for item in lights:
+            if isinstance(item, dict) and item.get("type") == light_type:
+                item["status"] = status
+                item["brightness"] = brightness
+                found = True
+                break
+
+        if not found:
+            lights.append(
+                {
+                    "type": light_type,
+                    "status": status,
+                    "brightness": brightness,
+                }
+            )
+
+        light_data["lights"] = lights
+        light_report["data"] = light_data
+        light_report["type"] = "light"
+        light_report["action"] = "control"
+        new_data["light"] = light_report
+
+        self.async_set_updated_data(new_data)
 
     async def async_set_camera_stream(self, enabled: bool) -> None:
         # AnycubicSlicerNext first sends stopCapture, waits briefly, and then
@@ -161,7 +221,7 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         new_data = dict(self.data or {})
         new_data[report_type] = payload
 
-        if report_type == "video":
+        if report_type == "video" or payload.get("type") == "video":
             self._update_camera_stream_state(new_data, payload)
 
         self.async_set_updated_data(new_data)
@@ -306,12 +366,9 @@ class _PersistentRawMqttClient:
                 if not isinstance(payload, dict):
                     continue
 
-                report_type = payload.get("type")
+                report_type = _report_type_from_topic_and_payload(topic, payload)
 
-                if not report_type:
-                    report_type = _type_from_topic(topic)
-
-                if not report_type:
+                if report_type == "unknown":
                     continue
 
                 with self._latest_lock:
@@ -608,6 +665,26 @@ def _task_id(data: dict[str, Any]) -> str:
     return ""
 
 
+def _report_type_from_topic_and_payload(
+    topic: str,
+    payload: dict[str, Any],
+) -> str:
+    payload_type = payload.get("type")
+
+    if isinstance(payload_type, str) and payload_type:
+        return payload_type
+
+    parts = topic.split("/")
+
+    if len(parts) >= 2 and parts[-1] == "report":
+        return parts[-2]
+
+    if parts:
+        return parts[-1]
+
+    return "unknown"
+
+
 def _decode_publish(body: bytes):
     topic_len = struct.unpack("!H", body[:2])[0]
     topic = body[2 : 2 + topic_len].decode("utf-8", errors="replace")
@@ -622,10 +699,3 @@ def _decode_publish(body: bytes):
     return topic, payload_value
 
 
-def _type_from_topic(topic: str) -> str | None:
-    parts = topic.split("/")
-
-    if len(parts) >= 2 and parts[-1] == "report":
-        return parts[-2]
-
-    return None

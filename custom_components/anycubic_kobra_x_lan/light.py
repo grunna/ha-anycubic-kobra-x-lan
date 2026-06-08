@@ -128,7 +128,6 @@ class AnycubicKobraXLanLight(
             1,
             brightness_percent,
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_light(
@@ -136,7 +135,6 @@ class AnycubicKobraXLanLight(
             0,
             0,
         )
-        await self.coordinator.async_request_refresh()
 
     def _light_data(self) -> dict[str, Any]:
         for light in _lights(self.coordinator.data or {}):
