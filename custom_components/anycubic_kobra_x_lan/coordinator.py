@@ -93,7 +93,44 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _handle_report_on_loop(self, report_type: str, payload: dict[str, Any]) -> None:
         new_data = dict(self.data or {})
         new_data[report_type] = payload
+
+        if report_type == "video":
+            self._update_camera_stream_state(new_data, payload)
+
         self.async_set_updated_data(new_data)
+
+    def _update_camera_stream_state(
+        self,
+        data: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        state = payload.get("state")
+        action = payload.get("action")
+        code = payload.get("code")
+
+        camera_stream = dict(data.get("camera_stream") or {})
+        camera_stream["last_action"] = action
+        camera_stream["last_state"] = state
+        camera_stream["last_code"] = code
+        camera_stream["optimistic"] = False
+
+        if state == "initSuccess":
+            camera_stream["enabled"] = True
+        elif state in ("pushStopped", "pushFailed", "initFailed"):
+            camera_stream["enabled"] = False
+
+        response_data = payload.get("data")
+
+        if isinstance(response_data, dict):
+            urls = response_data.get("urls")
+
+            if isinstance(urls, dict):
+                stream_url = urls.get("rtspUrl")
+
+                if isinstance(stream_url, str) and stream_url:
+                    camera_stream["stream_url_available"] = True
+
+        data["camera_stream"] = camera_stream
 
 
 class _PersistentRawMqttClient:
