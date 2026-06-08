@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import socket
@@ -68,12 +69,26 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def async_set_camera_stream(self, enabled: bool) -> None:
-        action = "startCapture" if enabled else "stopCapture"
-
-        await self.hass.async_add_executor_job(
-            self._mqtt.set_camera_stream,
-            action,
-        )
+        # AnycubicSlicerNext first sends stopCapture, waits briefly, and then
+        # sends startCapture when starting the LAN camera stream. Some printers
+        # do not start streaming if startCapture is sent directly.
+        if enabled:
+            await self.hass.async_add_executor_job(
+                self._mqtt.set_camera_stream,
+                "stopCapture",
+            )
+            await asyncio.sleep(1)
+            action = "startCapture"
+            await self.hass.async_add_executor_job(
+                self._mqtt.set_camera_stream,
+                action,
+            )
+        else:
+            action = "stopCapture"
+            await self.hass.async_add_executor_job(
+                self._mqtt.set_camera_stream,
+                action,
+            )
 
         new_data = dict(self.data or {})
         camera_stream = dict(new_data.get("camera_stream") or {})

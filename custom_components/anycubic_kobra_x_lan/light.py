@@ -47,6 +47,7 @@ class AnycubicKobraXLanLight(
 ):
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
     _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_assumed_state = False
 
     def __init__(
         self,
@@ -68,11 +69,11 @@ class AnycubicKobraXLanLight(
         }
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool:
         light = self._light_data()
 
         if not light:
-            return None
+            return False
 
         return light.get("status") == 1
 

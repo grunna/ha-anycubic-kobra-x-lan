@@ -26,6 +26,8 @@ class AnycubicKobraXLanCameraStreamSwitch(
     CoordinatorEntity[AnycubicKobraXLanCoordinator],
     SwitchEntity,
 ):
+    _attr_assumed_state = False
+
     def __init__(
         self,
         coordinator: AnycubicKobraXLanCoordinator,
@@ -44,13 +46,13 @@ class AnycubicKobraXLanCameraStreamSwitch(
         }
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool:
         camera_stream = (self.coordinator.data or {}).get("camera_stream")
 
-        if isinstance(camera_stream, dict) and "enabled" in camera_stream:
-            return bool(camera_stream["enabled"])
+        if isinstance(camera_stream, dict):
+            return bool(camera_stream.get("enabled", False))
 
-        return None
+        return False
 
     @property
     def available(self) -> bool:
