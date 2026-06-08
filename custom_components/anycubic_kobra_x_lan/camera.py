@@ -50,19 +50,18 @@ class AnycubicKobraXLanCamera(
         peripherie = _payload(self.coordinator.data or {}, "peripherie")
         return bool(peripherie.get("camera"))
 
+    async def stream_source(self) -> str | None:
+        if not self.is_on:
+            return None
+
+        return self._stream_url()
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        stream_url = self._stream_url()
-
-        if not stream_url:
-            return {}
-
         return {
-            "stream_url": stream_url,
+            "camera_available": self.is_on,
+            "stream_source": "internal",
         }
-
-    async def stream_source(self) -> str | None:
-        return self._stream_url()
 
     def _stream_url(self) -> str | None:
         info = _payload(self.coordinator.data or {}, "info")
