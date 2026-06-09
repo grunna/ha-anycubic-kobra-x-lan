@@ -23,11 +23,12 @@ Changes planned for the next release.
 
 ### Changed
 
-- Nothing yet.
+- Removed the unstable camera entity from the loaded platforms.
+- Camera stream URL is now exposed as an attribute on the Camera available binary sensor instead.
 
 ### Fixed
 
-- Nothing yet.
+- Avoid Home Assistant camera proxy authentication errors caused by the unsupported FLV-style camera stream.
 
 ### Notes
 
