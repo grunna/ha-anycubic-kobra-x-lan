@@ -10,7 +10,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -114,6 +114,67 @@ STATIC_SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
         key="loaded_slot",
         name="Loaded slot",
         value_fn=lambda data: _first_multi_color_box(data).get("loaded_slot"),
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_task",
+        name="Print task",
+        value_fn=lambda data: _project(data).get("filename")
+        or _project(data).get("name")
+        or _print_status(data),
+        attr_fn=lambda data: _project_attributes(data),
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_status",
+        name="Print status",
+        value_fn=lambda data: _print_status(data),
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_progress",
+        name="Print progress",
+        value_fn=lambda data: _project(data).get("progress"),
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="current_layer",
+        name="Current layer",
+        value_fn=lambda data: _project(data).get("curr_layer"),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="total_layers",
+        name="Total layers",
+        value_fn=lambda data: _project(data).get("total_layers"),
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="remaining_print_time",
+        name="Remaining print time",
+        value_fn=lambda data: _project(data).get("remain_time"),
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_time",
+        name="Print time",
+        value_fn=lambda data: _project(data).get("print_time"),
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="filament_used",
+        name="Filament used",
+        value_fn=lambda data: _filament_used_g(data),
+        native_unit_of_measurement="g",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="task_id",
+        name="Task ID",
+        value_fn=lambda data: _project(data).get("task_id")
+        or _project(data).get("taskid"),
     ),
 )
 
@@ -372,3 +433,101 @@ def _rgb_to_hex(color: list[Any]) -> str | None:
     b = max(0, min(255, b))
 
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+PRINT_STATUS_MAP = {
+    1: "printing",
+    2: "finished",
+    3: "failed",
+    4: "downloading",
+    5: "checking",
+    6: "preheating",
+    7: "slicing",
+    9: "auto_leveling",
+    10: "vibrating",
+    11: "flow_calibrating",
+    12: "drying",
+}
+
+
+def _project(data: dict[str, Any]) -> dict[str, Any]:
+    info = _payload(data, "info")
+    project = info.get("project")
+
+    if isinstance(project, dict) and project:
+        return project
+
+    print_report = data.get("print")
+
+    if not isinstance(print_report, dict):
+        return {}
+
+    print_data = print_report.get("data")
+
+    if not isinstance(print_data, dict):
+        return {}
+
+    project_from_print = dict(print_data)
+
+    state = print_report.get("state")
+    if state is not None:
+        project_from_print["state"] = state
+
+    task_id = project_from_print.get("taskid")
+    if task_id is not None and "task_id" not in project_from_print:
+        project_from_print["task_id"] = task_id
+
+    return project_from_print
+
+
+def _print_status(data: dict[str, Any]) -> Any:
+    project = _project(data)
+
+    state = project.get("state")
+    if state:
+        return state
+
+    status = project.get("print_status")
+
+    try:
+        return PRINT_STATUS_MAP.get(int(status), status)
+    except (TypeError, ValueError):
+        return status
+
+
+def _project_attributes(data: dict[str, Any]) -> dict[str, Any]:
+    project = dict(_project(data))
+
+    if not project:
+        return {}
+
+    project["print_status_text"] = _print_status(data)
+
+    filament_used = _filament_used_g(data)
+    if filament_used is not None:
+        project["filament_used_g"] = filament_used
+
+    return project
+
+
+def _filament_used_g(data: dict[str, Any]) -> float | None:
+    project = _project(data)
+
+    value = project.get("estimate_supplies_usage_g")
+
+    if value is not None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    supplies_usage = project.get("supplies_usage")
+
+    if supplies_usage is None:
+        return None
+
+    try:
+        # AnycubicSlicerNext converts filament length in mm to grams with this formula.
+        return round(((((3.141592653589793 * (1.75 / 2) * 1.75) / 2) * float(supplies_usage) * 1.23) / 1000), 2)
+    except (TypeError, ValueError):
+        return None
