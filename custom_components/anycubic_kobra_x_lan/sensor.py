@@ -113,7 +113,7 @@ STATIC_SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
     AnycubicSensorEntityDescription(
         key="loaded_slot",
         name="Loaded slot",
-        value_fn=lambda data: _first_multi_color_box(data).get("loaded_slot"),
+        value_fn=lambda data: _display_slot_number(_payload(data, "multiColorBox").get("loaded_slot")),
     ),
     AnycubicSensorEntityDescription(
         key="print_task",
@@ -529,5 +529,14 @@ def _filament_used_g(data: dict[str, Any]) -> float | None:
     try:
         # AnycubicSlicerNext converts filament length in mm to grams with this formula.
         return round(((((3.141592653589793 * (1.75 / 2) * 1.75) / 2) * float(supplies_usage) * 1.23) / 1000), 2)
+    except (TypeError, ValueError):
+        return None
+    
+def _display_slot_number(value: Any) -> int | None:
+    if value is None:
+        return None
+
+    try:
+        return int(value) + 1
     except (TypeError, ValueError):
         return None

@@ -4,6 +4,8 @@ A Home Assistant custom integration for monitoring and controlling an Anycubic K
 
 This integration is focused on local printer access. It does not require an Anycubic cloud account for normal operation.
 
+![Anycubic Kobra X dashboard](screenshots/anycubicDashboard.png)
+
 ## Features
 
 - Local setup by printer IP address
