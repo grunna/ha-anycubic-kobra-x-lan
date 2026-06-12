@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import secrets
 import string
 import time
@@ -12,6 +13,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AnycubicKobraXLanError(Exception):
@@ -78,10 +82,28 @@ class AnycubicKobraXLanClient:
         self.pc_device_id = pc_device_id.strip()
 
     def discover_credentials(self) -> AnycubicLanCredentials:
+        _LOGGER.debug("Starting LAN credential discovery for host %s", self.host)
+
         info = self._get_info()
 
-        token = info["token"]
-        ctrl_url = info["ctrlInfoUrl"]
+        _LOGGER.debug(
+            "Received /info response from host %s: keys=%s model=%s model_id=%s ctrl_type=%s ctrl_url_present=%s token_present=%s",
+            self.host,
+            sorted(info.keys()),
+            info.get("modelName"),
+            info.get("modelId"),
+            info.get("ctrlType"),
+            bool(info.get("ctrlInfoUrl")),
+            bool(info.get("token")),
+        )
+
+        try:
+            token = info["token"]
+            ctrl_url = info["ctrlInfoUrl"]
+        except KeyError as err:
+            raise AnycubicKobraXLanAuthError(
+                f"/info response missing required field: {err.args[0]}"
+            ) from err
 
         timestamp = str(int(time.time() * 1000))
         nonce = self._nonce(6)
@@ -100,15 +122,46 @@ class AnycubicKobraXLanClient:
             )
         )
 
+        _LOGGER.debug(
+            "Requesting /ctrl for host %s with pc_device_id_present=%s",
+            self.host,
+            bool(self.pc_device_id),
+        )
+
         ctrl = self._get_json(ctrl_request_url, method="POST")
+
+        _LOGGER.debug(
+            "Received /ctrl response from host %s: code=%s keys=%s data_keys=%s",
+            self.host,
+            ctrl.get("code"),
+            sorted(ctrl.keys()),
+            sorted(ctrl.get("data", {}).keys()) if isinstance(ctrl.get("data"), dict) else [],
+        )
 
         if ctrl.get("code") != 200:
             raise AnycubicKobraXLanAuthError(f"/ctrl failed: {ctrl}")
 
-        decrypted = self._decrypt_ctrl_info(
-            cipher_b64=ctrl["data"]["info"],
-            key=token[16:32],
-            iv=ctrl["data"]["token"],
+        try:
+            decrypted = self._decrypt_ctrl_info(
+                cipher_b64=ctrl["data"]["info"],
+                key=token[16:32],
+                iv=ctrl["data"]["token"],
+            )
+        except KeyError as err:
+            raise AnycubicKobraXLanAuthError(
+                f"/ctrl response missing required field: {err.args[0]}"
+            ) from err
+
+        _LOGGER.debug(
+            "Decrypted LAN credentials for host %s: keys=%s model=%s model_id=%s device_id_present=%s broker_present=%s username_present=%s password_present=%s",
+            self.host,
+            sorted(decrypted.keys()),
+            decrypted.get("modelName"),
+            decrypted.get("modelId") or decrypted.get("modeId"),
+            bool(decrypted.get("deviceId")),
+            bool(decrypted.get("broker")),
+            bool(decrypted.get("username")),
+            bool(decrypted.get("password") or decrypted.get("passWd")),
         )
 
         return AnycubicLanCredentials.from_dict(decrypted)
