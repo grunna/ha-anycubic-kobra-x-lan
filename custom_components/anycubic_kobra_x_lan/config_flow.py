@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from typing import Any
 
@@ -28,6 +29,9 @@ from .const import (
 
 def _generate_pc_device_id() -> str:
     return secrets.token_hex(16).upper()
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AnycubicKobraXLanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -59,6 +63,10 @@ class AnycubicKobraXLanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except AnycubicKobraXLanAuthError:
                 errors["base"] = "auth_failed"
             except Exception:
+                _LOGGER.exception(
+                    "Unexpected error while discovering Anycubic LAN printer at host %s",
+                    host,
+                )
                 errors["base"] = "unknown"
             else:
                 await self.async_set_unique_id(credentials.device_id)
