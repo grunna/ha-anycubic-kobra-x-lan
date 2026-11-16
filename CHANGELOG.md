@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.1
+
+### Fixed
+
+- Values froze while printing or streaming: every report the printer pushed on its own (progress, video, command replies) postponed the regular poll, so temperatures, layers and other polled values stopped updating. Pushed reports no longer reschedule the poll.
+- Camera stream cut itself off: until the printer confirmed `startCapture`, every new stream open (after 10 s) sent `stopCapture` + `startCapture` again and killed the running stream. A running or just requested capture is now left alone.
+- Camera relay waits for the first video data; if the printer sends none (or stops sending) the capture is restarted once automatically instead of leaving a black picture.
+- Printer card animation restarted (looked stuck) on every state update, e.g. each camera token change. The card now redraws only when something visible changes and resumes animations at the right phase.
+
 ## 0.2.0
 
 ### Added

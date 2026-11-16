@@ -12,6 +12,7 @@ view that answers ``200`` instead (same approach as Nino6689/hass-anycubic).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from http import HTTPStatus
@@ -41,6 +42,9 @@ _LOGGER = logging.getLogger(__name__)
 _STREAM_PROXY_URL = "/api/anycubic_kobra_x_lan/camera_stream/{entity_id}"
 _STREAM_CHUNK_SIZE = 64 * 1024
 _STREAM_CONNECT_TIMEOUT = 10
+# A running capture sends data many times a second.
+_STREAM_FIRST_DATA_TIMEOUT = 8
+_STREAM_READ_TIMEOUT = 20
 _VIEW_REGISTERED = f"{DOMAIN}_camera_view_registered"
 
 
@@ -194,27 +198,20 @@ class AnycubicKobraXLanCameraStreamView(CameraView):
             raise web.HTTPServiceUnavailable
 
         await camera.coordinator.async_start_camera()
+        upstream, first = await _async_open_upstream(camera, source_url)
+
+        if upstream is None:
+            # The printer is not pushing although we think it is (it stopped
+            # on its own, or the last start was lost): restart it once.
+            _LOGGER.debug("Camera sent no video, restarting the capture")
+            await camera.coordinator.async_start_camera(force=True)
+            await asyncio.sleep(2)
+            upstream, first = await _async_open_upstream(camera, source_url)
+
+        if upstream is None:
+            raise web.HTTPBadGateway(reason="The printer camera sends no video")
 
         try:
-            upstream = await async_get_clientsession(camera.hass).get(
-                source_url,
-                timeout=ClientTimeout(
-                    total=None,
-                    sock_connect=_STREAM_CONNECT_TIMEOUT,
-                    sock_read=None,
-                ),
-            )
-        except (ClientError, TimeoutError) as err:
-            raise web.HTTPBadGateway(
-                reason="Could not connect to the printer camera"
-            ) from err
-
-        try:
-            if upstream.status not in (HTTPStatus.OK, HTTPStatus.PARTIAL_CONTENT):
-                raise web.HTTPBadGateway(
-                    reason=f"Printer camera returned HTTP {upstream.status}"
-                )
-
             response = web.StreamResponse(
                 status=HTTPStatus.OK,
                 headers={
@@ -228,17 +225,73 @@ class AnycubicKobraXLanCameraStreamView(CameraView):
             await response.prepare(request)
 
             try:
-                async for chunk in upstream.content.iter_chunked(_STREAM_CHUNK_SIZE):
+                await response.write(first)
+
+                while True:
+                    chunk = await asyncio.wait_for(
+                        upstream.content.read(_STREAM_CHUNK_SIZE),
+                        _STREAM_READ_TIMEOUT,
+                    )
+
+                    if not chunk:
+                        break
+
                     await response.write(chunk)
 
                 await response.write_eof()
+            except TimeoutError:
+                # The printer stopped pushing: the next open restarts it.
+                _LOGGER.debug("Camera stream stalled, capture marked stopped")
+                camera.coordinator.async_camera_stalled()
             except (ClientError, ConnectionResetError) as err:
-                # Viewer went away or the printer stopped pushing.
+                # Viewer went away or the printer stopped pushing; the stream
+                # worker reconnects and the next open restarts the capture.
                 _LOGGER.debug("Camera stream relay ended: %s", err)
 
             return response
         finally:
             upstream.release()
+
+
+async def _async_open_upstream(camera, source_url: str):
+    """Connect to the printer and wait for the first bytes of video.
+
+    Returns (response, first_chunk), or (None, b"") when the printer refuses
+    or stays silent, so the caller can restart the capture.
+    """
+    try:
+        upstream = await async_get_clientsession(camera.hass).get(
+            source_url,
+            timeout=ClientTimeout(
+                total=None,
+                sock_connect=_STREAM_CONNECT_TIMEOUT,
+                sock_read=None,
+            ),
+        )
+    except (ClientError, TimeoutError) as err:
+        _LOGGER.debug("Could not connect to the printer camera: %s", err)
+        return None, b""
+
+    if upstream.status not in (HTTPStatus.OK, HTTPStatus.PARTIAL_CONTENT):
+        _LOGGER.debug("Printer camera returned HTTP %s", upstream.status)
+        upstream.release()
+        return None, b""
+
+    try:
+        first = await asyncio.wait_for(
+            upstream.content.read(_STREAM_CHUNK_SIZE),
+            _STREAM_FIRST_DATA_TIMEOUT,
+        )
+    except (ClientError, TimeoutError) as err:
+        _LOGGER.debug("Printer camera sent no data: %s", err)
+        upstream.release()
+        return None, b""
+
+    if not first:
+        upstream.release()
+        return None, b""
+
+    return upstream, first
 
 
 def _is_local_flv(url: str) -> bool:

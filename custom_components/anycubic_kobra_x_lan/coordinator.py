@@ -25,6 +25,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CAMERA_RESUME_WINDOW_SECONDS,
+    CAMERA_CONFIRM_SECONDS,
     CAMERA_START_DEBOUNCE_SECONDS,
     CAMERA_STREAM_PORT,
     CONF_POLLING_INTERVAL,
@@ -118,6 +119,19 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return data
 
+    @callback
+    def async_push_data(self, data: dict[str, Any]) -> None:
+        """Publish data the printer pushed on its own (or an optimistic state).
+
+        Unlike async_set_updated_data this does not reschedule the poll. The
+        printer pushes progress, video and command replies every few seconds
+        while printing or streaming; rescheduling on each of them pushed the
+        poll back forever, so temperatures, layers etc. froze.
+        """
+        self.data = data
+        self.last_update_success = True
+        self.async_update_listeners()
+
     async def async_shutdown(self) -> None:
         await self.hass.async_add_executor_job(self._mqtt.stop)
 
@@ -181,7 +195,7 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         light_report["action"] = "control"
         new_data["light"] = light_report
 
-        self.async_set_updated_data(new_data)
+        self.async_push_data(new_data)
 
     async def async_set_camera_stream(self, enabled: bool) -> None:
         if enabled:
@@ -213,15 +227,24 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 return
 
-            self._camera_last_start = now
             camera_stream = (self.data or {}).get("camera_stream") or {}
-            running = (
-                camera_stream.get("enabled")
-                and not camera_stream.get("optimistic")
+            enabled = bool(camera_stream.get("enabled"))
+            confirmed = enabled and not camera_stream.get("optimistic")
+            waiting = (
+                enabled
+                and camera_stream.get("optimistic")
+                and now - self._camera_last_start < CAMERA_CONFIRM_SECONDS
             )
 
+            if not force and (confirmed or waiting):
+                # Already pushing (or just asked to): sending stop/start again
+                # would cut the stream every viewer is watching.
+                return
+
+            self._camera_last_start = now
+
             try:
-                if not running:
+                if force or not enabled:
                     # AnycubicSlicerNext sends stopCapture first and waits
                     # briefly; some firmwares ignore a bare startCapture when
                     # the previous capture session was not closed cleanly.
@@ -239,8 +262,12 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Could not start the camera stream: %s", err)
                 return
 
-            if not running:
-                self._set_camera_stream_optimistic(True, "startCapture")
+            self._set_camera_stream_optimistic(True, "startCapture")
+
+    @callback
+    def async_camera_stalled(self) -> None:
+        self._camera_last_start = 0.0
+        self._set_camera_stream_optimistic(False, "stalled")
 
     def camera_stream_url(self) -> str | None:
         """Return the printer's local HTTP-FLV stream URL."""
@@ -270,7 +297,7 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         camera_stream["last_action"] = action
         camera_stream["optimistic"] = True
         new_data["camera_stream"] = camera_stream
-        self.async_set_updated_data(new_data)
+        self.async_push_data(new_data)
 
     def _handle_connected_from_thread(self) -> None:
         self.hass.loop.call_soon_threadsafe(self._handle_connected_on_loop)
@@ -284,7 +311,7 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             camera_stream["enabled"] = False
             camera_stream["optimistic"] = True
             new_data["camera_stream"] = camera_stream
-            self.async_set_updated_data(new_data)
+            self.async_push_data(new_data)
 
         # Resume a stream somebody was watching when the connection dropped.
         # A start already in flight opened this connection itself.
@@ -515,7 +542,7 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             new_data["fan"] = fan
 
-        self.async_set_updated_data(new_data)
+        self.async_push_data(new_data)
 
     def _handle_report_from_thread(self, report_type: str, payload: dict[str, Any]) -> None:
         self.hass.loop.call_soon_threadsafe(
@@ -527,7 +554,7 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _handle_report_on_loop(self, report_type: str, payload: dict[str, Any]) -> None:
         new_data = dict(self.data or {})
         self._apply_report(new_data, report_type, payload)
-        self.async_set_updated_data(new_data)
+        self.async_push_data(new_data)
 
     # ----- print preview -------------------------------------------------
 

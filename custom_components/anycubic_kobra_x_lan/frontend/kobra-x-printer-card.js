@@ -13,7 +13,7 @@
  *  MIT License
  */
 (() => {
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const TAG = 'kobra-x-printer-card';
   const DOMAIN = 'anycubic_kobra_x_lan';
 
@@ -162,7 +162,7 @@
     setConfig(c) {
       if (!c) throw new Error('Invalid configuration');
       this._c = Object.assign({ view: 'printer', language: 'auto', preview: true }, c);
-      this._key = ''; this._r = null; this._rKey = '';
+      this._key = ''; this._r = null; this._rKey = ''; this._lastHtml = '';
       if (!this.shadowRoot) { this.attachShadow({ mode: 'open' }); this.shadowRoot.addEventListener('click', (ev) => this._click(ev)); }
       if (this._h) this.hass = this._h;
     }
@@ -185,7 +185,9 @@
     }
     _ids() {
       const r = this._r; if (!r) return [];
-      const l = Object.values(r.m);
+      // The camera entity changes its token and stream attributes all the time
+      // and is not drawn by these views.
+      const l = Object.entries(r.m).filter(([k]) => !k.startsWith('camera:')).map(([, v]) => v);
       if (this._c.plug) l.push(this._c.plug);
       if (this._c.power) l.push(this._c.power);
       return l;
@@ -287,7 +289,15 @@
         else html = this._c.view === 'details' ? this._details() : this._printer();
       } catch (x) { html = `<div class="pad">Kobra X Printer Card: ${esc(x.message)}</div>`; }
       this._cam = null;
-      this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="karta">${html}</div>`;
+      // Only touch the DOM when something visible changed, so animations keep
+      // running smoothly instead of restarting on every state update.
+      if (html === this._lastHtml && this.shadowRoot.querySelector('.karta')) return;
+      this._lastHtml = html;
+      // Start every animation at the phase it would have reached by now.
+      const now = Date.now(), ph = (ms) => '-' + ((now % ms) / 1000).toFixed(2) + 's';
+      const live = html.split('__PH6__').join(ph(6000));
+      const sync = `.puls{animation-delay:${ph(1600)}}.stul{animation-delay:${ph(2400)}}.toc{animation-delay:${ph(1000)}}`;
+      this.shadowRoot.innerHTML = `<style>${CSS}${sync}</style><div class="karta">${live}</div>`;
     }
     _header(S, withValues) {
       const t = this._t, E = (k) => this._e(k);
@@ -432,10 +442,10 @@
         const col = act ? partColor : '#BFC5CB';
         const d0 = tube(sx, i, -amp), d1 = tube(sx, i, amp);
         pr += `<path d="${d0}" fill="none" stroke="${col}" stroke-width="${act ? 3 : 2}" stroke-opacity="${act ? 1 : 0.85}">`
-          + (amp ? `<animate attributeName="d" values="${d0};${d1};${d0}" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>` : '') + `</path>`;
+          + (amp ? `<animate attributeName="d" values="${d0};${d1};${d0}" dur="6s" begin="__PH6__" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>` : '') + `</path>`;
       });
       const digit = activeSlot >= 0 ? String(activeSlot + 1) : '–';
-      pr += `<g>` + (amp ? `<animateTransform attributeName="transform" type="translate" values="${-amp} 0;${amp} 0;${-amp} 0" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>` : '')
+      pr += `<g>` + (amp ? `<animateTransform attributeName="transform" type="translate" values="${-amp} 0;${amp} 0;${-amp} 0" dur="6s" begin="__PH6__" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>` : '')
         + `<rect x="181" y="${gantryY - 46}" width="38" height="6" rx="2" fill="#D5DADF" stroke="${frS}" stroke-width="0.6"/>`
         + `<rect x="176" y="${gantryY - 40}" width="48" height="84" rx="7" fill="#EEF1F3" stroke="${frS}"/>`
         + `<text x="182" y="${gantryY - 30}" font-size="6" font-weight="700" fill="#4A5D70">ACE</text><text x="196" y="${gantryY - 30}" font-size="6" font-style="italic" fill="#4A5D70">GEN2</text>`
@@ -515,7 +525,6 @@
     _details() {
       const t = this._t, E = (k) => this._e(k), btn = this._btn.bind(this);
       const S = this._status();
-      const ph = ((Date.now() % 1000) / 1000).toFixed(2);
       let h = `<div class="pad"><div class="nadpis"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>${t.controls}</div><div class="tlacitka">`;
       if (S.phase === 'printing' || S.phase === 'prepare') h += btn(t.pause, 'mdi:pause', 'button', 'press', E('button:pause_print'), { ask: t.qPause, yes: t.aPause });
       if (S.phase === 'paused') h += btn(t.resume, 'mdi:play', 'button', 'press', E('button:resume_print'), { ask: t.qResume, yes: t.aResume });
@@ -571,7 +580,7 @@
       // tiles
       const tN = this._n(E('sensor:nozzle_temperature')), zN = this._n(E('sensor:target_nozzle_temperature'));
       const tB = this._n(E('sensor:bed_temperature')), zB = this._n(E('sensor:target_bed_temperature'));
-      const fanRow = (label, k) => { const e = E(k); if (!e) return null; const x = this._n(e); return [label, (x > 0 ? `<span class="toc" style="animation-delay:-${ph}s">✻</span> ` : '') + this._int(x) + ' %']; };
+      const fanRow = (label, k) => { const e = E(k); if (!e) return null; const x = this._n(e); return [label, (x > 0 ? `<span class="toc">✻</span> ` : '') + this._int(x) + ' %']; };
       const lan = this._st(E('binary_sensor:lan_connection')) === 'on';
       const reason = this._st(E('sensor:print_reason')), lastErr = this._st(E('sensor:last_print_error'));
       h += `<div class="nadpis"><ha-icon icon="mdi:information-outline"></ha-icon>${t.values}</div><div class="dlazdice">`;

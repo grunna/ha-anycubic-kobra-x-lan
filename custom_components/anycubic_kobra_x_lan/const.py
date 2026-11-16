@@ -26,6 +26,8 @@ PLATFORMS = [
 # told to startCapture over MQTT.
 CAMERA_STREAM_PORT = 18088
 CAMERA_START_DEBOUNCE_SECONDS = 10
+# How long an unconfirmed startCapture is trusted before it is sent again.
+CAMERA_CONFIRM_SECONDS = 30
 # Restart the stream after a reconnect if it was viewed this recently.
 CAMERA_RESUME_WINDOW_SECONDS = 600
 
