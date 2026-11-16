@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
 - Pause reason sensor with names for Anycubic's reason/error codes.
 - Print preview and plate view image entities (job thumbnail via `file/fileDetails`).
 - Firmware version on the device page.
+- Printer card drawing redrawn after the real Kobra X: spool rack with four side-on spools, PTFE tubes into the ACE GEN2 head showing the loaded slot, X module, bed and touchscreen; the head and tubes move together while printing. `device` is optional.
+- Complete copy & paste dashboard with every entity (`dashboards/kobra_x_dashboard.yaml`, also in the README).
 - Every entity has a stable `translation_key`, so cards and automations can find it regardless of its name.
 
 ## 0.1.3

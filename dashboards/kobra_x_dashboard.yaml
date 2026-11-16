@@ -1,0 +1,377 @@
+# Anycubic Kobra X – complete dashboard with every entity of the integration.
+# Settings → Dashboards → Add dashboard → New dashboard from scratch → open it →
+# ⋮ → Edit dashboard → ⋮ → Raw configuration editor → paste this whole file → Save.
+# Entity IDs assume the default device name "Anycubic Kobra X".
+# Axis buttons and axis position sensors are disabled by default in the integration:
+# enable them on the device page (Settings → Devices → Anycubic Kobra X), otherwise the
+# "Osy" section shows them as unavailable.
+views:
+  - title: Kobra X
+    path: kobra-x
+    icon: mdi:printer-3d
+    type: sections
+    max_columns: 4
+    sections:
+      # ---------- printer picture + camera ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Tiskárna
+            icon: mdi:printer-3d
+          - type: custom:kobra-x-printer-card
+            view: printer
+            grid_options:
+              columns: full
+          - type: picture-entity
+            entity: camera.anycubic_kobra_x_camera
+            name: Kamera
+            camera_view: live
+            show_state: false
+            grid_options:
+              columns: full
+          - type: tile
+            entity: switch.anycubic_kobra_x_camera_stream
+            name: Stream kamery
+          - type: tile
+            entity: light.anycubic_kobra_x_camera_light
+            name: Světlo kamery
+
+      # ---------- controls, filament, values ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Ovládání
+            icon: mdi:gesture-tap-button
+          - type: custom:kobra-x-printer-card
+            view: details
+            grid_options:
+              columns: full
+
+      # ---------- print job ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Tisková úloha
+            icon: mdi:file-cad-box
+          - type: tile
+            entity: sensor.anycubic_kobra_x_print_progress
+            name: Průběh
+            grid_options:
+              columns: full
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.anycubic_kobra_x_print_task
+                name: Úloha
+              - entity: sensor.anycubic_kobra_x_print_status
+                name: Stav tisku
+              - entity: sensor.anycubic_kobra_x_printer_state
+                name: Stav tiskárny
+              - entity: sensor.anycubic_kobra_x_current_layer
+                name: Aktuální vrstva
+              - entity: sensor.anycubic_kobra_x_total_layers
+                name: Vrstev celkem
+              - entity: sensor.anycubic_kobra_x_remaining_print_time
+                name: Zbývá
+              - entity: sensor.anycubic_kobra_x_print_time
+                name: Doba tisku
+              - entity: sensor.anycubic_kobra_x_estimated_finish
+                name: Hotovo v
+                format: time
+              - entity: sensor.anycubic_kobra_x_filament_used
+                name: Spotřeba filamentu
+              - entity: sensor.anycubic_kobra_x_task_id
+                name: ID úlohy
+          - type: entities
+            title: Rychlost
+            show_header_toggle: false
+            entities:
+              - entity: select.anycubic_kobra_x_print_speed_mode
+                name: Režim rychlosti
+              - entity: sensor.anycubic_kobra_x_print_speed_mode_name
+                name: Název režimu
+              - entity: sensor.anycubic_kobra_x_print_speed_mode
+                name: Číslo režimu
+              - entity: sensor.anycubic_kobra_x_print_speed
+                name: Rychlost
+          - type: entities
+            title: Řízení tisku
+            show_header_toggle: false
+            entities:
+              - entity: button.anycubic_kobra_x_pause_print
+                name: Pozastavit
+              - entity: button.anycubic_kobra_x_resume_print
+                name: Pokračovat
+              - entity: button.anycubic_kobra_x_cancel_print
+                name: Zrušit tisk
+          - type: entities
+            title: Stav
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.anycubic_kobra_x_printing
+                name: Tiskne
+              - entity: binary_sensor.anycubic_kobra_x_print_paused
+                name: Pozastaveno
+              - entity: binary_sensor.anycubic_kobra_x_print_complete
+                name: Dokončeno
+              - entity: binary_sensor.anycubic_kobra_x_print_failed
+                name: Selhalo
+              - entity: binary_sensor.anycubic_kobra_x_print_cancelled
+                name: Zrušeno
+              - entity: event.anycubic_kobra_x_print_event
+                name: Poslední událost
+              - entity: sensor.anycubic_kobra_x_pause_reason
+                name: Důvod pauzy
+              - entity: sensor.anycubic_kobra_x_last_print_error
+                name: Poslední chyba
+          - type: picture-entity
+            entity: image.anycubic_kobra_x_print_preview
+            name: Náhled modelu
+            show_state: false
+          - type: picture-entity
+            entity: image.anycubic_kobra_x_print_plate_view
+            name: Pohled na podložku
+            show_state: false
+
+      # ---------- temperatures and fans ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Teploty a ventilátory
+            icon: mdi:thermometer
+          - type: gauge
+            entity: sensor.anycubic_kobra_x_nozzle_temperature
+            name: Tryska
+            min: 0
+            max: 300
+            needle: true
+            severity:
+              green: 0
+              yellow: 170
+              red: 260
+          - type: gauge
+            entity: sensor.anycubic_kobra_x_bed_temperature
+            name: Podložka
+            min: 0
+            max: 110
+            needle: true
+            severity:
+              green: 0
+              yellow: 50
+              red: 90
+          - type: entities
+            title: Teploty
+            show_header_toggle: false
+            entities:
+              - entity: number.anycubic_kobra_x_target_nozzle_temperature
+                name: Nastavit trysku
+              - entity: sensor.anycubic_kobra_x_target_nozzle_temperature
+                name: Cíl trysky
+              - entity: number.anycubic_kobra_x_target_bed_temperature
+                name: Nastavit podložku
+              - entity: sensor.anycubic_kobra_x_target_bed_temperature
+                name: Cíl podložky
+          - type: entities
+            title: Ventilátory
+            show_header_toggle: false
+            entities:
+              - entity: sensor.anycubic_kobra_x_fan_speed
+                name: Ventilátor modelu
+              - entity: number.anycubic_kobra_x_model_fan_speed
+                name: Nastavit ventilátor modelu
+              - entity: sensor.anycubic_kobra_x_aux_fan_speed
+                name: Přídavný ventilátor
+              - entity: number.anycubic_kobra_x_aux_fan_speed
+                name: Nastavit přídavný
+              - entity: number.anycubic_kobra_x_box_fan_speed
+                name: Ventilátor boxu
+          - type: history-graph
+            title: Teploty – 6 h
+            hours_to_show: 6
+            entities:
+              - entity: sensor.anycubic_kobra_x_nozzle_temperature
+                name: Tryska
+              - entity: sensor.anycubic_kobra_x_bed_temperature
+                name: Podložka
+
+      # ---------- filament / color unit ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Filament
+            icon: mdi:palette-swatch-variant
+          - type: entities
+            title: Barevná jednotka
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.anycubic_kobra_x_multi_color_box_available
+                name: Dostupná
+              - entity: sensor.anycubic_kobra_x_multi_color_box_status
+                name: Stav
+              - entity: sensor.anycubic_kobra_x_loaded_slot
+                name: Zavedený slot
+              - entity: sensor.anycubic_kobra_x_box_1_slot_1
+                name: Slot 1
+              - entity: sensor.anycubic_kobra_x_box_1_slot_2
+                name: Slot 2
+              - entity: sensor.anycubic_kobra_x_box_1_slot_3
+                name: Slot 3
+              - entity: sensor.anycubic_kobra_x_box_1_slot_4
+                name: Slot 4
+              - entity: sensor.anycubic_kobra_x_multi_color_box_temperature
+                name: Teplota
+              - entity: sensor.anycubic_kobra_x_multi_color_box_humidity
+                name: Vlhkost
+              - entity: switch.anycubic_kobra_x_runout_auto_refill
+                name: Automatické doplnění
+              - entity: button.anycubic_kobra_x_retract_filament
+                name: Vytáhnout filament
+          - type: entities
+            title: Sušení
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.anycubic_kobra_x_drying
+                name: Suší
+              - entity: number.anycubic_kobra_x_drying_temperature
+                name: Teplota sušení
+              - entity: number.anycubic_kobra_x_drying_duration
+                name: Doba sušení
+              - entity: button.anycubic_kobra_x_start_drying
+                name: Spustit sušení
+              - entity: button.anycubic_kobra_x_stop_drying
+                name: Zastavit sušení
+              - entity: sensor.anycubic_kobra_x_drying_target_temperature
+                name: Cílová teplota
+              - entity: sensor.anycubic_kobra_x_drying_duration
+                name: Nastavená doba
+              - entity: sensor.anycubic_kobra_x_drying_remaining_time
+                name: Zbývá sušit
+
+      # ---------- axes ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Osy
+            icon: mdi:axis-arrow
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: button.anycubic_kobra_x_home_all_axes
+                name: Domů všechny osy
+              - entity: button.anycubic_kobra_x_home_x_y
+                name: Domů X/Y
+              - entity: button.anycubic_kobra_x_home_z
+                name: Domů Z
+              - entity: button.anycubic_kobra_x_disable_motors
+                name: Vypnout motory
+              - entity: button.anycubic_kobra_x_read_axis_position
+                name: Načíst polohu
+              - entity: binary_sensor.anycubic_kobra_x_axis_moving
+                name: Osy v pohybu
+              - entity: sensor.anycubic_kobra_x_axis_position_x
+                name: Poloha X
+              - entity: sensor.anycubic_kobra_x_axis_position_y
+                name: Poloha Y
+              - entity: sensor.anycubic_kobra_x_axis_position_z
+                name: Poloha Z
+          - type: horizontal-stack
+            cards:
+              - type: button
+                name: X −10
+                icon: mdi:arrow-left
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: x
+                    distance: -10
+              - type: button
+                name: X +10
+                icon: mdi:arrow-right
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: x
+                    distance: 10
+              - type: button
+                name: Y −10
+                icon: mdi:arrow-down
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: y
+                    distance: -10
+              - type: button
+                name: Y +10
+                icon: mdi:arrow-up
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: y
+                    distance: 10
+          - type: horizontal-stack
+            cards:
+              - type: button
+                name: Z −1
+                icon: mdi:arrow-collapse-down
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: z
+                    distance: -1
+              - type: button
+                name: Z +1
+                icon: mdi:arrow-collapse-up
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: z
+                    distance: 1
+              - type: button
+                name: Z +10
+                icon: mdi:arrow-expand-up
+                tap_action:
+                  action: perform-action
+                  perform_action: anycubic_kobra_x_lan.move_axis
+                  data:
+                    axis: z
+                    distance: 10
+
+      # ---------- device / diagnostics ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Zařízení
+            icon: mdi:information-outline
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.anycubic_kobra_x_lan_connection
+                name: LAN spojení
+              - entity: sensor.anycubic_kobra_x_model
+                name: Model
+              - entity: sensor.anycubic_kobra_x_ip_address
+                name: IP adresa
+              - entity: sensor.anycubic_kobra_x_firmware_version
+                name: Firmware
+              - entity: sensor.anycubic_kobra_x_features
+                name: Funkce
+              - entity: binary_sensor.anycubic_kobra_x_camera_available
+                name: Kamera dostupná
+              - entity: binary_sensor.anycubic_kobra_x_usb_available
+                name: USB dostupné
+              - entity: button.anycubic_kobra_x_refresh_data
+                name: Obnovit data
+              - entity: button.anycubic_kobra_x_reconnect_lan_connection
+                name: Znovu připojit LAN
+          - type: logbook
+            title: Události tisku
+            hours_to_show: 48
+            entities:
+              - event.anycubic_kobra_x_print_event
+              - sensor.anycubic_kobra_x_print_status

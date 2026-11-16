@@ -2,7 +2,7 @@
  *  live values inside. Served by the anycubic_kobra_x_lan integration.
  *
  *  type: custom:kobra-x-printer-card
- *    device:   <device_id of the printer>    (pick it in the card editor)
+ *    device:   <device_id of the printer>    (optional, default: the first Kobra X LAN printer)
  *    view:     printer | details | camera    (picture / controls, filament and values / camera with overlay)
  *    plug:     switch.xyz                    (optional smart plug of the printer)
  *    power:    sensor.xyz                    (optional power sensor)
@@ -80,10 +80,8 @@
   svg{display:block;width:100%;height:auto}
   svg text{font-family:Roboto,Arial,sans-serif}
   [data-act]{cursor:pointer}
-  .hlava{animation:hlava 6s ease-in-out infinite}
-  @keyframes hlava{0%,100%{transform:translateX(-70px)}50%{transform:translateX(70px)}}
   .stul{animation:stul 2.4s ease-in-out infinite}
-  @keyframes stul{0%,100%{transform:translateY(0)}50%{transform:translateY(5px)}}
+  @keyframes stul{0%,100%{transform:translateY(0)}50%{transform:translateY(1.5px)}}
   .puls{animation:puls 1.6s ease-in-out infinite}
   @keyframes puls{0%,100%{opacity:1}50%{opacity:.25}}
   .toc{animation:toc 1s linear infinite;display:inline-block}
@@ -148,6 +146,12 @@
     return { m, boxes, model: dev.model || 'Kobra X', name: dev.name_by_user || dev.name || 'Anycubic Kobra X' };
   }
 
+  // Without a configured device the card takes the first Kobra X LAN printer.
+  function autoDevice(hass) {
+    const e = Object.values((hass && hass.entities) || {}).find((x) => x.platform === DOMAIN && x.device_id && x.translation_key === 'print_status');
+    return e ? e.device_id : '';
+  }
+
   class KobraXPrinterCard extends HTMLElement {
     static getConfigElement() { return document.createElement(TAG + '-editor'); }
     static getStubConfig(hass) {
@@ -160,14 +164,15 @@
       this._c = Object.assign({ view: 'printer', language: 'auto', preview: true }, c);
       this._key = ''; this._r = null; this._rKey = '';
       if (!this.shadowRoot) { this.attachShadow({ mode: 'open' }); this.shadowRoot.addEventListener('click', (ev) => this._click(ev)); }
-      if (this._h) this._render();
+      if (this._h) this.hass = this._h;
     }
     getCardSize() { return this._c && this._c.view === 'details' ? 9 : this._c && this._c.view === 'camera' ? 5 : 11; }
     getGridOptions() { return { columns: 'full', rows: 'auto' }; }
     set hass(h) {
       this._h = h;
-      const rk = (this._c && this._c.device) + '|' + Object.keys(h.entities || {}).length + '|' + Object.keys(h.devices || {}).length;
-      if (rk !== this._rKey) { this._rKey = rk; this._r = this._c && this._c.device ? resolve(h, this._c.device) : null; this._key = ''; }
+      if (this._c) this._dev = this._c.device || autoDevice(h);
+      const rk = this._dev + '|' + Object.keys(h.entities || {}).length + '|' + Object.keys(h.devices || {}).length;
+      if (rk !== this._rKey) { this._rKey = rk; this._r = this._dev ? resolve(h, this._dev) : null; this._key = ''; }
       if (this._c && this._c.view === 'camera' && this._cam) this._cam.hass = h;
       const k = this._ids().map((e) => { const s = h.states[e]; return s ? s.state + '@' + s.last_updated : '-'; }).join('|') + '|' + (h.locale && h.locale.language);
       if (k === this._key) return;
@@ -276,7 +281,7 @@
       if (!this._h || !this._c || !this.shadowRoot) return;
       let html;
       try {
-        if (!this._c.device) html = `<div class="pad male">${esc(this._t.noDevice)}</div>`;
+        if (!this._dev) html = `<div class="pad male">${esc(this._t.noDevice)}</div>`;
         else if (!this._r || !this._e('sensor:print_status')) html = `<div class="pad male">${esc(this._t.notFound)}</div>`;
         else if (this._c.view === 'camera') { this._renderCamera(); return; }
         else html = this._c.view === 'details' ? this._details() : this._printer();
@@ -321,6 +326,31 @@
       }
       return s;
     }
+    // Side view of a spool hanging on the top rack, like on the real Kobra X.
+    _rackSpool(cx, y0, sl, nr) {
+      const w = 50, h = 104, x0 = cx - w / 2;
+      let s = `<g data-act="info" data-e="${esc(sl.e)}"><rect x="${x0 - 2}" y="${y0 - 14}" width="${w + 4}" height="${h + 42}" fill="transparent"/>`
+        + `<text x="${cx}" y="${y0 - 4}" font-size="9" fill="#8AA0B6" text-anchor="middle">${nr}</text>`
+        + `<rect x="${cx - 3}" y="${y0 - 2}" width="6" height="${h / 2 + 2}" fill="#AEB5BC"/>`;
+      // core + filament winding, its height shows how much is left
+      s += `<rect x="${x0 + 5}" y="${y0 + h / 2 - 9}" width="${w - 10}" height="18" fill="#C9CED3"/>`;
+      if (!sl.empty) {
+        const k = isNaN(sl.rem) ? 0.75 : 0.22 + 0.78 * sl.rem / 100;
+        const fh = Math.round((h - 8) * k);
+        const fy = y0 + (h - fh) / 2;
+        s += `<rect x="${x0 + 5}" y="${fy}" width="${w - 10}" height="${fh}" rx="2" fill="${sl.c}"/>`
+          + `<rect x="${x0 + 5}" y="${fy}" width="${w - 10}" height="${fh}" rx="2" fill="url(#navinM)"/>`
+          + `<rect x="${x0 + 5}" y="${fy}" width="${w - 10}" height="${fh}" rx="2" fill="url(#civkaBokG)"/>`;
+      } else {
+        s += `<text x="${cx}" y="${y0 + h / 2 + 4}" font-size="11" fill="#6E8399" text-anchor="middle">${sl.unknown ? '?' : '–'}</text>`;
+      }
+      // flanges
+      s += `<rect x="${x0}" y="${y0}" width="5" height="${h}" rx="2" fill="#D5DADF" stroke="#9AA3AB" stroke-width="0.6"/>`
+        + `<rect x="${x0 + w - 5}" y="${y0}" width="5" height="${h}" rx="2" fill="#D5DADF" stroke="#9AA3AB" stroke-width="0.6"/>`;
+      if (sl.act) s += `<rect class="puls" x="${x0 - 3}" y="${y0 - 3}" width="${w + 6}" height="${h + 6}" rx="6" fill="none" stroke="#FFF" stroke-width="1.8"/>`;
+      s += `<text x="${cx}" y="${y0 + h + 14}" font-size="9.5" fill="${sl.act ? '#FFF' : '#8AA0B6'}" font-weight="${sl.act ? 700 : 400}" text-anchor="middle">${sl.empty ? '–' : esc(sl.type || '?')}${sl.empty || isNaN(sl.rem) ? '' : ' ' + this._int(sl.rem) + '%'}</text></g>`;
+      return s;
+    }
     _printer() {
       const t = this._t, E = (k) => this._e(k);
       const S = this._status();
@@ -332,79 +362,120 @@
       const lightE = this._light(), light = this._st(lightE) === 'on';
       const printing = S.phase === 'printing';
       const loadedOf = this._boxLoaded();
-      // ---- built-in color unit (box 1) and expansion boxes, drawn on top of the printer ----
       const boxes = this._r.boxes.map((b) => Object.assign({}, b, { loaded: loadedOf(b.idx) }));
-      let partColor = '';
-      boxes.forEach((b) => b.slots.forEach((e) => { const sl = this._slot(e, b); if (sl.act && !partColor) partColor = sl.c; }));
+      let partColor = '', activeSlot = -1;
+      boxes.forEach((b) => b.slots.forEach((e, i) => { const sl = this._slot(e, b); if (sl.act && !partColor) { partColor = sl.c; if (b.nr === 1) activeSlot = i; } }));
       if (!partColor) partColor = '#9AA6B2';
-      const rows = Math.ceil(Math.max(0, boxes.length - 1) / 2);
-      const topH = rows * 118; // expansion boxes above the printer
+      const nC = heat(tN, 40, 260), bC = heat(tB, 25, 100);
+      // ---- expansion boxes (ACE 2 Pro) above the printer ----
+      const ext = boxes.slice(1);
+      const rows = Math.ceil(ext.length / 2);
+      const topH = rows * 118;
       let svgTop = '', pipes = '';
-      boxes.slice(1).forEach((b, i) => {
-        const row = Math.floor(i / 2), inRow = Math.min(2, boxes.length - 1 - row * 2);
+      ext.forEach((b, i) => {
+        const row = Math.floor(i / 2), inRow = Math.min(2, ext.length - row * 2);
         const w = inRow === 2 ? 188 : 320, x0 = inRow === 2 ? (i % 2 === 0 ? 8 : 204) : 40, y0 = 4 + row * 118;
         svgTop += this._boxSvg(b, x0, y0, w, 108, false);
         const xm = x0 + w / 2, act = b.loaded >= 0 && S.active;
-        pipes += `<path d="M${xm} ${y0 + 108} C${xm} ${topH + 20} 200 ${topH + 4} 200 ${topH + 24}" fill="none" stroke="${act ? partColor : '#C9D6E3'}" stroke-opacity="${act ? 1 : 0.25}" stroke-width="${act ? 3 : 2}"/>`;
+        pipes += `<path d="M${xm} ${y0 + 108} C${xm} ${topH + 14} 200 ${topH + 2} 200 ${topH + 16}" fill="none" stroke="${act ? partColor : '#C9D6E3'}" stroke-opacity="${act ? 1 : 0.25}" stroke-width="${act ? 3 : 2}"/>`;
       });
-      // ---- printer (A1-style open-frame bed slinger), drawn from y=0, shifted by Y ----
-      const Y = topH + 10;
-      const partH = (S.active || S.phase === 'finished') ? Math.round(S.prog * 0.9) : 0;
-      const bedTop = 350;
-      const gantryY = Math.max(150, bedTop - 34 - partH);
-      const nC = heat(tN, 40, 260), bC = heat(tB, 25, 100);
+      // ---- the printer, drawn from y=0 and shifted by Y ----
+      const Y = topH + (ext.length ? 14 : 0);
+      const bedTop = 384;
+      const partH = (S.active || S.phase === 'finished') ? Math.round(S.prog * 0.95) : 0;
+      const gantryY = Math.max(196, bedTop - 62 - partH); // beam centre; nozzle tip at gantryY + 61
+      const fr = '#E3E7EB', frS = '#A9B1B9', frD = '#C4CAD0';
+      let pr = '';
+      // top spool rack: hooks, two posts, four spools seen from the side
+      pr += `<rect x="46" y="10" width="124" height="6" rx="2" fill="${frD}" stroke="${frS}" stroke-width="0.6"/><rect x="230" y="10" width="124" height="6" rx="2" fill="${frD}" stroke="${frS}" stroke-width="0.6"/>`
+        + `<rect x="102" y="10" width="12" height="150" rx="3" fill="${fr}" stroke="${frS}" stroke-width="0.6"/><rect x="286" y="10" width="12" height="150" rx="3" fill="${fr}" stroke="${frS}" stroke-width="0.6"/>`;
       const unit = boxes[0];
-      // filament rack with the built-in 4-color unit on top of the frame
-      let pr = `<rect x="40" y="12" width="320" height="104" rx="12" fill="url(#jednotkaG)" stroke="#3A434D"/>`;
-      if (unit) pr += this._boxSvg(unit, 40, 12, 320, 104, true);
-      else pr += `<text x="200" y="68" font-size="12" fill="#6E8399" text-anchor="middle">${esc(t.unit)}</text>`;
-      // frame uprights + top bar
-      pr += `<rect x="52" y="116" width="16" height="292" rx="4" fill="url(#ramG)" stroke="#3A434D"/><rect x="332" y="116" width="16" height="292" rx="4" fill="url(#ramG)" stroke="#3A434D"/>`
-        + `<rect x="60" y="130" width="2" height="270" fill="#4A535C"/><rect x="338" y="130" width="2" height="270" fill="#4A535C"/>`;
-      // light glow
-      if (light) pr += `<rect x="68" y="120" width="264" height="270" fill="url(#svetloG)"/>`;
-      // part
+      const spoolX = [74, 142, 258, 326];
+      const unitSlots = unit ? unit.slots.slice(0, 4).map((e) => this._slot(e, unit)) : [];
+      spoolX.forEach((cx, i) => {
+        const sl = unitSlots[i] || { e: '', empty: true, unknown: true, c: '#888', rem: NaN, act: false, type: '' };
+        pr += this._rackSpool(cx, 22, sl, i + 1);
+      });
+      // frame: top bar, uprights, left camera/cutter bracket
+      pr += `<rect x="56" y="156" width="288" height="16" rx="4" fill="${fr}" stroke="${frS}"/>`
+        + `<rect x="60" y="154" width="22" height="8" rx="2" fill="#F4F6F8" stroke="${frS}" stroke-width="0.6"/><rect x="318" y="154" width="22" height="8" rx="2" fill="#F4F6F8" stroke="${frS}" stroke-width="0.6"/>`
+        + `<rect x="62" y="160" width="20" height="262" rx="3" fill="url(#profilG)" stroke="${frS}"/><rect x="318" y="160" width="20" height="262" rx="3" fill="url(#profilG)" stroke="${frS}"/>`
+        + `<rect x="70" y="176" width="3" height="236" fill="#B9C0C7"/><rect x="327" y="176" width="3" height="236" fill="#B9C0C7"/>`;
+      if (light) pr += `<rect x="82" y="172" width="236" height="214" fill="url(#svetloG)"/>`;
+      // bed: dark textured plate on the carriage (Y bed slinger)
       const yb = bedTop;
-      if (partH > 0) pr += `<g ${printing ? 'class="stul"' : ''}><rect x="172" y="${yb - partH}" width="56" height="${partH}" rx="2" fill="${partColor}"/><rect x="172" y="${yb - partH}" width="56" height="${partH}" rx="2" fill="url(#vrstvyM)"/><rect x="172" y="${yb - partH}" width="56" height="${partH}" rx="2" fill="url(#dilG)"/></g>`;
-      // bed (moves in Y -> small bounce while printing)
-      pr += `<g ${printing ? 'class="stul"' : ''}><rect x="84" y="${yb}" width="232" height="9" rx="2" fill="#9AA3AB"/><rect x="78" y="${yb + 8}" width="244" height="8" rx="2" fill="#39414A"/></g>`;
-      // base with screen
-      pr += `<rect x="40" y="398" width="320" height="44" rx="10" fill="url(#ramG)" stroke="#3A434D"/>`
-        + `<g data-act="info" data-e="${esc(E('sensor:print_progress'))}"><rect x="232" y="404" width="118" height="32" rx="5" fill="#070A0E" stroke="#4A5D70"/>`
-        + (S.online ? `<text x="242" y="425" font-size="${S.active || S.phase === 'finished' ? 15 : 11}" font-weight="700" fill="${S.col}">${S.active || S.phase === 'finished' ? this._int(S.prog) + ' %' : esc(S.txt).slice(0, 15)}</text>`
-          + (S.active ? `<text x="344" y="417" font-size="8.5" fill="#9FB3C8" text-anchor="end">${this._int(lay)}/${this._int(layT)}</text><text x="344" y="430" font-size="8.5" fill="#9FB3C8" text-anchor="end">${esc(this._dur(E('sensor:remaining_print_time')))}</text>` : '')
-          : `<text x="242" y="424" font-size="12" fill="#4A5D70">${esc(t.off)}</text>`) + `</g>`
-        + `<text x="54" y="425" font-size="12" font-weight="700" fill="#C9D6E3" letter-spacing="1">${esc(this._r.model.replace(/^Anycubic\s*/i, '').toUpperCase())}</text>`
-        + `<rect x="150" y="436" width="70" height="3" rx="1.5" fill="${S.col}"${printing ? ' class="puls"' : ''}/>`;
-      // X gantry (rises with Z) + toolhead
-      pr += `<rect x="60" y="${gantryY}" width="280" height="10" rx="3" fill="#262B31" stroke="#3E464F"/>`
-        + `<path d="M200 116 C 200 ${(116 + gantryY) / 2} 200 ${(116 + gantryY) / 2} 200 ${gantryY - 14}" fill="none" stroke="${S.active ? partColor : '#C9D6E3'}" stroke-opacity="${S.active ? 0.9 : 0.25}" stroke-width="2.5"/>`
-        + `<g ${printing ? 'class="hlava"' : ''}><rect x="178" y="${gantryY - 18}" width="44" height="40" rx="6" fill="#DDE3E8" stroke="#9AA6B2"/><rect x="183" y="${gantryY - 11}" width="34" height="5" rx="2" fill="#2A3036"/><circle cx="210" cy="${gantryY + 8}" r="4.5" fill="none" stroke="#7D8893" stroke-width="1.5"/>`
-        + `<path d="M193 ${gantryY + 22} L207 ${gantryY + 22} L203 ${gantryY + 30} L197 ${gantryY + 30} Z" fill="${nC}"/>` + (tN > 150 ? `<circle cx="200" cy="${gantryY + 31}" r="5" fill="${nC}" opacity="0.55"/>` : '') + `</g>`;
-      // job preview on the screen side
+      pr += `<g ${printing ? 'class="stul"' : ''}><rect x="98" y="${yb}" width="204" height="8" rx="2" fill="#4A4F55"/><rect x="98" y="${yb}" width="204" height="8" rx="2" fill="url(#pekM)"/>`
+        + `<rect x="${98}" y="${yb + 8}" width="204" height="5" rx="1" fill="#9AA1A8"/><rect x="${118}" y="${yb + 13}" width="164" height="6" fill="#6E767E"/></g>`;
+      // printed part, nozzle tip touches it
+      if (partH > 0) pr += `<g ${printing ? 'class="stul"' : ''}><rect x="176" y="${yb - partH}" width="48" height="${partH}" rx="2" fill="${partColor}"/><rect x="176" y="${yb - partH}" width="48" height="${partH}" rx="2" fill="url(#vrstvyM)"/><rect x="176" y="${yb - partH}" width="48" height="${partH}" rx="2" fill="url(#dilG)"/></g>`;
+      // base with front button and the touchscreen on the right
+      pr += `<path d="M64 404 H336 Q350 404 350 418 V436 Q350 450 336 450 H64 Q50 450 50 436 V418 Q50 404 64 404Z" fill="#EEF1F3" stroke="${frS}"/>`
+        + `<rect x="50" y="440" width="300" height="10" rx="5" fill="#C4CAD0"/><circle cx="200" cy="428" r="5" fill="#DDE2E6" stroke="${frS}"/>`
+        + `<g data-act="info" data-e="${esc(E('sensor:print_progress'))}"><path d="M306 384 L366 380 Q372 380 372 386 L372 414 Q372 420 366 420 L306 422 Q300 422 300 416 L300 390 Q300 384 306 384Z" fill="#06080B" stroke="#59616A"/>`
+        + (S.online ? `<text x="336" y="${S.active ? 400 : 405}" font-size="${S.active || S.phase === 'finished' ? 12 : 8}" font-weight="700" fill="${S.col}" text-anchor="middle">${S.active || S.phase === 'finished' ? this._int(S.prog) + '%' : esc(S.txt).slice(0, 12)}</text>`
+          + (S.active ? `<text x="336" y="413" font-size="7" fill="#9FB3C8" text-anchor="middle">${esc(this._dur(E('sensor:remaining_print_time')))}</text>` : '')
+          : '') + `</g>`;
+      // cable from the X module down to the base
+      pr += `<path d="M368 ${gantryY + 24} C 372 ${gantryY + 90} 384 ${(gantryY + 400) / 2} 376 396 C 372 404 360 408 352 410" fill="none" stroke="#2A2E33" stroke-width="5" stroke-linecap="round"/>`;
+      // X gantry (rises with Z)
+      pr += `<rect x="40" y="${gantryY - 6}" width="22" height="14" rx="2" fill="#6E767E"/><rect x="30" y="${gantryY + 4}" width="34" height="9" rx="2" fill="#80878E"/>`
+        + `<rect x="56" y="${gantryY - 10}" width="300" height="20" rx="3" fill="url(#profilG)" stroke="${frS}"/><rect x="62" y="${gantryY - 2}" width="288" height="3" fill="#B9C0C7"/>`
+        + `<g><rect x="346" y="${gantryY - 18}" width="40" height="38" rx="5" fill="#F1F3F5" stroke="${frS}"/><text x="352" y="${gantryY - 6}" font-size="4.5" fill="#6E767E">ANYCUBIC</text><text x="352" y="${gantryY}" font-size="4.5" fill="#6E767E">KOBRA</text><text x="379" y="${gantryY + 6}" font-size="16" font-weight="700" fill="#E5484D" text-anchor="middle">X</text></g>`;
+      // PTFE tubes from the spools into the head, and the head (ACE GEN2) – animated together while printing
+      const amp = printing ? 38 : 0;
+      const tube = (sx, i, dx) => {
+        const hx = 200 + dx + (i - 1.5) * 4, hy = gantryY - 44;
+        return `M${sx} 24 C ${sx + (sx < 200 ? 30 : -30)} ${-4} ${hx} ${Math.min(hy - 60, 120)} ${hx} ${hy}`;
+      };
+      spoolX.forEach((sx, i) => {
+        const act = i === activeSlot && S.active;
+        const col = act ? partColor : '#BFC5CB';
+        const d0 = tube(sx, i, -amp), d1 = tube(sx, i, amp);
+        pr += `<path d="${d0}" fill="none" stroke="${col}" stroke-width="${act ? 3 : 2}" stroke-opacity="${act ? 1 : 0.85}">`
+          + (amp ? `<animate attributeName="d" values="${d0};${d1};${d0}" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>` : '') + `</path>`;
+      });
+      const digit = activeSlot >= 0 ? String(activeSlot + 1) : '–';
+      pr += `<g>` + (amp ? `<animateTransform attributeName="transform" type="translate" values="${-amp} 0;${amp} 0;${-amp} 0" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>` : '')
+        + `<rect x="181" y="${gantryY - 46}" width="38" height="6" rx="2" fill="#D5DADF" stroke="${frS}" stroke-width="0.6"/>`
+        + `<rect x="176" y="${gantryY - 40}" width="48" height="84" rx="7" fill="#EEF1F3" stroke="${frS}"/>`
+        + `<text x="182" y="${gantryY - 30}" font-size="6" font-weight="700" fill="#4A5D70">ACE</text><text x="196" y="${gantryY - 30}" font-size="6" font-style="italic" fill="#4A5D70">GEN2</text>`
+        + `<rect x="182" y="${gantryY - 26}" width="36" height="28" rx="3" fill="#0B0F14"/>`
+        + `<text x="194" y="${gantryY - 5}" font-size="20" font-weight="700" fill="${S.active && activeSlot >= 0 ? '#FFF' : '#59616A'}" text-anchor="middle">${digit}</text>`
+        + `<circle cx="210" cy="${gantryY - 12}" r="3.5" fill="${S.active ? partColor : '#2A3036'}"/>`
+        + `<text x="200" y="${gantryY + 24}" font-size="5.5" font-weight="700" fill="#4A5D70" text-anchor="middle" letter-spacing="0.6">ANYCUBIC</text>`
+        + `<rect x="192" y="${gantryY + 44}" width="16" height="8" rx="2" fill="#7D8893"/>`
+        + `<path d="M195 ${gantryY + 52} L205 ${gantryY + 52} L202 ${gantryY + 60} L198 ${gantryY + 60} Z" fill="${nC}"/>` + (tN > 150 ? `<circle cx="200" cy="${gantryY + 61}" r="4.5" fill="${nC}" opacity="0.55"/>` : '')
+        + `</g>`;
+      // job preview inside the frame
       const prev = E('image:print_preview');
       const pst = this._S(prev);
-      if (this._c.preview !== false && pst && pst.attributes && pst.attributes.entity_picture && S.active) {
-        pr += `<g data-act="info" data-e="${esc(prev)}"><rect x="272" y="136" width="56" height="56" rx="8" fill="#0B1016" stroke="#4A5D70"/><image href="${esc(pst.attributes.entity_picture)}" x="275" y="139" width="50" height="50" preserveAspectRatio="xMidYMid meet"/></g>`;
+      if (this._c.preview !== false && pst && pst.attributes && pst.attributes.entity_picture && S.active && pst.state !== 'unavailable') {
+        pr += `<g data-act="info" data-e="${esc(prev)}"><rect x="254" y="${Math.min(180, gantryY - 72)}" width="58" height="58" rx="8" fill="#0B1016" stroke="#4A5D70"/><image href="${esc(pst.attributes.entity_picture)}" x="257" y="${Math.min(180, gantryY - 72) + 3}" width="52" height="52" preserveAspectRatio="xMidYMid meet"/></g>`;
       }
-      // values
+      // light and camera toggles on the left
+      if (lightE) pr += `<g data-act="svc" data-dom="light" data-svc="toggle" data-e="${esc(lightE)}"><circle cx="24" cy="186" r="13" fill="${light ? '#F7D04A' : '#18293B'}" stroke="${light ? '#F7D04A' : '#4A5D70'}"/><path d="M24 178 a5 5 0 0 1 3 9 v2 h-6 v-2 a5 5 0 0 1 3 -9z M21.5 191 h5 v2 h-5z" fill="${light ? '#0F1A26' : '#8AA0B6'}"/></g>`;
+      const cam = E('switch:camera_stream');
+      if (cam) { const co = this._st(cam) === 'on'; pr += `<g data-act="svc" data-dom="switch" data-svc="toggle" data-e="${esc(cam)}"><circle cx="24" cy="220" r="13" fill="${co ? '#4FA3F7' : '#18293B'}" stroke="${co ? '#4FA3F7' : '#4A5D70'}"/><rect x="16" y="215" width="11" height="10" rx="2" fill="${co ? '#0F1A26' : '#8AA0B6'}"/><path d="M27 218 l5 -3 v10 l-5 -3z" fill="${co ? '#0F1A26' : '#8AA0B6'}"/></g>`; }
+      // values under the printer
       const nT = E('number:target_nozzle_temperature_control') || E('sensor:target_nozzle_temperature');
       const bT = E('number:target_bed_temperature_control') || E('sensor:target_bed_temperature');
-      pr += this._pill(76, Math.max(140, gantryY - 46), t.nozzle, this._int(tN) + (isNaN(zN) || zN <= 0 ? ' °C' : ' / ' + this._int(zN) + ' °C'), nC, 'start', nT)
-        + this._pill(76, yb + 21, t.bed, this._int(tB) + (isNaN(zB) || zB <= 0 ? ' °C' : ' / ' + this._int(zB) + ' °C'), bC, 'start', bT)
-        + (fan > 0 ? this._pill(326, Math.max(140, gantryY - 46) + (prev && S.active && this._c.preview !== false ? 60 : 0), t.fan, this._int(fan) + ' %', '#4FA3F7', 'end', E('number:model_fan_speed_control') || E('sensor:fan_speed')) : '')
-        + (aux > 0 ? this._pill(326, Math.max(140, gantryY - 46) + (prev && S.active && this._c.preview !== false ? 84 : 24), t.aux, this._int(aux) + ' %', '#4FA3F7', 'end', E('number:aux_fan_speed_control') || E('sensor:aux_fan_speed')) : '');
-      // light toggle
-      if (lightE) pr += `<g data-act="svc" data-dom="light" data-svc="toggle" data-e="${esc(lightE)}"><circle cx="370" cy="150" r="13" fill="${light ? '#F7D04A' : '#18293B'}" stroke="${light ? '#F7D04A' : '#4A5D70'}"/><path d="M370 142 a5 5 0 0 1 3 9 v2 h-6 v-2 a5 5 0 0 1 3 -9z M367.5 155 h5 v2 h-5z" fill="${light ? '#0F1A26' : '#8AA0B6'}"/></g>`;
-      const cam = E('switch:camera_stream');
-      if (cam) { const co = this._st(cam) === 'on'; pr += `<g data-act="svc" data-dom="switch" data-svc="toggle" data-e="${esc(cam)}"><circle cx="370" cy="184" r="13" fill="${co ? '#4FA3F7' : '#18293B'}" stroke="${co ? '#4FA3F7' : '#4A5D70'}"/><rect x="362" y="179" width="11" height="10" rx="2" fill="${co ? '#0F1A26' : '#8AA0B6'}"/><path d="M373 182 l5 -3 v10 l-5 -3z" fill="${co ? '#0F1A26' : '#8AA0B6'}"/></g>`; }
-      const H = 450 + Y;
-      const off = S.online ? '' : `<rect x="0" y="0" width="400" height="${H}" fill="#0F1A26" fill-opacity="0.6"/><text x="200" y="${260 + Y}" font-size="22" font-weight="700" fill="#8AA0B6" text-anchor="middle">${esc(t.offline)}</text>`;
+      pr += `<text x="20" y="468" font-size="10" font-weight="700" fill="#C9D6E3" letter-spacing="1">${esc(this._r.model.replace(/^Anycubic\s*/i, '').toUpperCase())}</text>`
+        + (S.active ? `<text x="380" y="468" font-size="10" fill="#9FB3C8" text-anchor="end">${t.layer} ${this._int(lay)}/${this._int(layT)}</text>` : '')
+        + `<rect x="150" y="459" width="100" height="3" rx="1.5" fill="${S.col}"${printing ? ' class="puls"' : ''}/>`
+        + this._pill(20, 478, t.nozzle, this._int(tN) + (isNaN(zN) || zN <= 0 ? ' °C' : ' / ' + this._int(zN) + ' °C'), nC, 'start', nT)
+        + this._pill(380, 478, t.bed, this._int(tB) + (isNaN(zB) || zB <= 0 ? ' °C' : ' / ' + this._int(zB) + ' °C'), bC, 'end', bT)
+        + this._pill(20, 504, t.fan, (fan > 0 ? '' : '') + this._int(fan) + ' %', fan > 0 ? '#4FA3F7' : '#4A5D70', 'start', E('number:model_fan_speed_control') || E('sensor:fan_speed'))
+        + (E('sensor:aux_fan_speed') ? this._pill(380, 504, t.aux, this._int(aux) + ' %', aux > 0 ? '#4FA3F7' : '#4A5D70', 'end', E('number:aux_fan_speed_control') || E('sensor:aux_fan_speed')) : '');
+      const H = 530 + Y;
+      const off = S.online ? '' : `<rect x="0" y="0" width="400" height="${H}" fill="#0F1A26" fill-opacity="0.6"/><text x="200" y="${280 + Y}" font-size="22" font-weight="700" fill="#8AA0B6" text-anchor="middle">${esc(t.offline)}</text>`;
       const defs = `<defs>
         <linearGradient id="jednotkaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#353C44"/><stop offset="1" stop-color="#20252B"/></linearGradient>
-        <linearGradient id="ramG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E343A"/><stop offset="1" stop-color="#16191D"/></linearGradient>
-        <radialGradient id="svetloG" cx="0.5" cy="0.2" r="0.9"><stop offset="0" stop-color="#FFE8B8" stop-opacity="0.28"/><stop offset="1" stop-color="#FFE8B8" stop-opacity="0"/></radialGradient>
+        <linearGradient id="profilG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#D3D8DD"/><stop offset="0.45" stop-color="#F2F4F6"/><stop offset="1" stop-color="#C9CED3"/></linearGradient>
+        <radialGradient id="svetloG" cx="0.5" cy="0.1" r="0.9"><stop offset="0" stop-color="#FFE8B8" stop-opacity="0.30"/><stop offset="1" stop-color="#FFE8B8" stop-opacity="0"/></radialGradient>
         <radialGradient id="civkaG" cx="0.35" cy="0.3" r="0.75"><stop offset="0" stop-color="#FFF" stop-opacity="0.35"/><stop offset="0.6" stop-color="#FFF" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.3"/></radialGradient>
+        <linearGradient id="civkaBokG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.30"/><stop offset="0.35" stop-color="#FFF" stop-opacity="0.18"/><stop offset="0.6" stop-color="#FFF" stop-opacity="0.05"/><stop offset="1" stop-color="#000" stop-opacity="0.35"/></linearGradient>
+        <pattern id="navinM" width="3" height="3" patternUnits="userSpaceOnUse"><rect width="1" height="3" fill="#000" fill-opacity="0.16"/></pattern>
+        <pattern id="pekM" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.7" fill="#FFF" fill-opacity="0.12"/></pattern>
         <linearGradient id="dilG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.25"/><stop offset="0.4" stop-color="#FFF" stop-opacity="0.12"/><stop offset="1" stop-color="#000" stop-opacity="0.35"/></linearGradient>
         <pattern id="vrstvyM" width="4" height="3" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#000" fill-opacity="0.18"/></pattern>
       </defs>`;
@@ -570,7 +641,7 @@
       this._f.hass = this._h;
       this._f.data = Object.assign({ preview: true }, this._c);
       this._f.schema = [
-        { name: 'device', required: true, selector: { device: { integration: DOMAIN } } },
+        { name: 'device', selector: { device: { integration: DOMAIN } } },
         { name: 'view', selector: { select: { mode: 'dropdown', options: [{ value: 'printer', label: t.vPrinter }, { value: 'details', label: t.vDetails }, { value: 'camera', label: t.vCamera }] } } },
         { name: 'plug', selector: { entity: { domain: ['switch', 'light', 'input_boolean'] } } },
         { name: 'power', selector: { entity: { domain: 'sensor', device_class: 'power' } } },
