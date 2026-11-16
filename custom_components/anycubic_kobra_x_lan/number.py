@@ -3,15 +3,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from homeassistant.components.number import NumberDeviceClass, NumberEntity
+from homeassistant.components.number import (
+    NumberDeviceClass,
+    NumberEntity,
+    NumberMode,
+    RestoreNumber,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import AnycubicKobraXLanCoordinator
+from .entity import AnycubicKobraXLanEntity
 
 
 @dataclass(frozen=True)
@@ -103,6 +114,32 @@ async def async_setup_entry(
         AnycubicKobraXLanNumber(coordinator, entry, description)
         for description in NUMBERS
     )
+    async_add_entities(
+        [
+            AnycubicKobraXLanDryingSetting(
+                coordinator,
+                entry,
+                key="drying_set_temperature",
+                name="Drying temperature",
+                attribute="drying_target_temp",
+                min_value=35,
+                max_value=70,
+                unit=UnitOfTemperature.CELSIUS,
+                device_class=NumberDeviceClass.TEMPERATURE,
+            ),
+            AnycubicKobraXLanDryingSetting(
+                coordinator,
+                entry,
+                key="drying_set_duration",
+                name="Drying duration",
+                attribute="drying_duration",
+                min_value=1,
+                max_value=720,
+                unit=UnitOfTime.MINUTES,
+                device_class=NumberDeviceClass.DURATION,
+            ),
+        ]
+    )
 
 
 class AnycubicKobraXLanNumber(
@@ -121,6 +158,8 @@ class AnycubicKobraXLanNumber(
         self._entry = entry
         self._description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = description.key
         self._attr_has_entity_name = True
         self._attr_name = description.name
         self._attr_native_min_value = description.min_value
@@ -166,6 +205,50 @@ class AnycubicKobraXLanNumber(
             self._description.setting_key,
             new_value,
         )
+
+
+class AnycubicKobraXLanDryingSetting(AnycubicKobraXLanEntity, RestoreNumber):
+    """Value used by the Start drying button; kept in Home Assistant."""
+
+    _attr_mode = NumberMode.BOX
+    _attr_native_step = 1
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: AnycubicKobraXLanCoordinator,
+        entry: ConfigEntry,
+        *,
+        key: str,
+        name: str,
+        attribute: str,
+        min_value: float,
+        max_value: float,
+        unit: str,
+        device_class: NumberDeviceClass,
+    ) -> None:
+        super().__init__(coordinator, entry, key)
+        self._attribute = attribute
+        self._attr_name = name
+        self._attr_native_min_value = min_value
+        self._attr_native_max_value = max_value
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+
+        if last is not None and last.native_value is not None:
+            setattr(self.coordinator, self._attribute, int(last.native_value))
+
+    @property
+    def native_value(self) -> float:
+        return float(getattr(self.coordinator, self._attribute))
+
+    async def async_set_native_value(self, value: float) -> None:
+        setattr(self.coordinator, self._attribute, int(round(value)))
+        self.async_write_ha_state()
 
 
 def _temperature(data: dict[str, Any]) -> dict[str, Any]:

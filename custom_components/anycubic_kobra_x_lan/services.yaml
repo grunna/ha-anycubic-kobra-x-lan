@@ -19,3 +19,96 @@ reconnect:
       required: false
       selector:
         text:
+
+move_axis:
+  name: Move axis
+  description: Jog one axis by a relative distance. The printer ignores moves until it has been homed, and refuses them while printing.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID. If omitted, all configured Anycubic printers move.
+      required: false
+      selector:
+        text:
+    axis:
+      name: Axis
+      description: Axis to move.
+      required: true
+      selector:
+        select:
+          options:
+            - "x"
+            - "y"
+            - "z"
+    distance:
+      name: Distance
+      description: Distance in millimetres. Negative values move in the minus direction.
+      required: true
+      selector:
+        number:
+          min: -100
+          max: 100
+          step: 1
+          unit_of_measurement: mm
+
+start_drying:
+  name: Start filament drying
+  description: Start drying in the multi-color box (ACE).
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID. If omitted, all configured Anycubic printers start drying.
+      required: false
+      selector:
+        text:
+    box:
+      name: Box
+      description: Box number, 1 for the first box.
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 4
+          step: 1
+    temperature:
+      name: Temperature
+      description: Drying temperature. Defaults to the Drying temperature entity.
+      required: false
+      selector:
+        number:
+          min: 35
+          max: 70
+          step: 1
+          unit_of_measurement: "°C"
+    duration:
+      name: Duration
+      description: Drying time in minutes. Defaults to the Drying duration entity.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 720
+          step: 1
+          unit_of_measurement: min
+
+stop_drying:
+  name: Stop filament drying
+  description: Stop drying in the multi-color box (ACE).
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID. If omitted, all configured Anycubic printers stop drying.
+      required: false
+      selector:
+        text:
+    box:
+      name: Box
+      description: Box number, 1 for the first box.
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 4
+          step: 1

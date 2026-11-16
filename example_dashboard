@@ -9,6 +9,17 @@ views:
         cards:
           - type: heading
             heading: Anycubic Kobra X
+          - type: custom:kobra-x-printer-card
+            view: printer
+          - type: custom:kobra-x-printer-card
+            view: details
+          - type: picture-entity
+            entity: camera.anycubic_kobra_x_camera
+            name: Kobra X
+            camera_view: live
+            show_state: false
+            tap_action:
+              action: more-info
           - type: entities
             title: Anycubic Kobra X
             show_header_toggle: false
@@ -33,12 +44,41 @@ views:
                 name: Camera light
               - entity: button.anycubic_kobra_x_refresh_data
                 name: Refresh
-          - type: entities
-            title: Print progress
-            show_header_toggle: false
-            entities:
-              - entity: sensor.anycubic_kobra_x_print_progress
-                name: Progress
+          - type: tile
+            entity: sensor.anycubic_kobra_x_print_progress
+            name: Progress
+            features_position: bottom
+          - type: horizontal-stack
+            cards:
+              - type: button
+                entity: button.anycubic_kobra_x_pause_print
+                name: Pause
+                icon: mdi:pause
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.anycubic_kobra_x_pause_print
+              - type: button
+                entity: button.anycubic_kobra_x_resume_print
+                name: Resume
+                icon: mdi:play
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.anycubic_kobra_x_resume_print
+              - type: button
+                entity: button.anycubic_kobra_x_cancel_print
+                name: Cancel
+                icon: mdi:stop
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.anycubic_kobra_x_cancel_print
+                  confirmation:
+                    text: Cancel the running print?
           - type: gauge
             name: Anycubic nozzle
             entity: sensor.anycubic_kobra_x_nozzle_temperature
@@ -89,6 +129,8 @@ views:
                 name: Refresh data
               - entity: button.anycubic_kobra_x_reconnect_lan_connection
                 name: Reconnect LAN
+              - entity: binary_sensor.anycubic_kobra_x_lan_connection
+                name: LAN connection
               - entity: light.anycubic_kobra_x_camera_light
                 name: Camera light
               - entity: switch.printer_socket_2
@@ -121,6 +163,29 @@ views:
                 name: Filament used
               - entity: sensor.anycubic_kobra_x_task_id
                 name: Task ID
+          - type: entities
+            title: Print control
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.anycubic_kobra_x_printing
+                name: Printing
+              - entity: binary_sensor.anycubic_kobra_x_print_paused
+                name: Paused
+              - entity: sensor.anycubic_kobra_x_estimated_finish
+                name: Estimated finish
+                format: time
+              - entity: select.anycubic_kobra_x_print_speed_mode
+                name: Speed mode
+              - entity: sensor.anycubic_kobra_x_print_speed
+                name: Print speed
+              - entity: button.anycubic_kobra_x_pause_print
+                name: Pause
+              - entity: button.anycubic_kobra_x_resume_print
+                name: Resume
+              - entity: button.anycubic_kobra_x_cancel_print
+                name: Cancel
+              - entity: sensor.anycubic_kobra_x_last_print_error
+                name: Last error
           - type: markdown
             title: Print time
             content: >
@@ -264,15 +329,55 @@ views:
                 name: Box 1 slot 3
               - entity: sensor.anycubic_kobra_x_box_1_slot_4
                 name: Box 1 slot 4
+              - entity: switch.anycubic_kobra_x_runout_auto_refill
+                name: Runout auto refill
+              - entity: button.anycubic_kobra_x_retract_filament
+                name: Retract filament
+          - type: entities
+            title: Filament drying
+            show_header_toggle: false
+            entities:
+              - entity: sensor.anycubic_kobra_x_multi_color_box_temperature
+                name: Box temperature
+              - entity: sensor.anycubic_kobra_x_multi_color_box_humidity
+                name: Box humidity
+              - entity: binary_sensor.anycubic_kobra_x_drying
+                name: Drying
+              - entity: sensor.anycubic_kobra_x_drying_remaining_time
+                name: Remaining
+              - entity: number.anycubic_kobra_x_drying_temperature
+                name: Drying temperature
+              - entity: number.anycubic_kobra_x_drying_duration
+                name: Drying duration
+              - entity: button.anycubic_kobra_x_start_drying
+                name: Start drying
+              - entity: button.anycubic_kobra_x_stop_drying
+                name: Stop drying
       - type: grid
         cards:
           - type: heading
             heading: Camera
+          # camera_view: live keeps the stream open while the dashboard is
+          # visible; opening it sends startCapture to the printer, so the
+          # picture comes back on its own after a printer or HA restart.
+          - type: picture-entity
+            entity: camera.anycubic_kobra_x_camera
+            name: Kobra X camera
+            camera_view: live
+            show_state: false
+            tap_action:
+              action: more-info
           - type: entities
             title: Camera
             show_header_toggle: false
             entities:
               - entity: binary_sensor.anycubic_kobra_x_camera_available
                 name: Camera available
+              - entity: switch.anycubic_kobra_x_camera_stream
+                name: Camera stream
               - entity: light.anycubic_kobra_x_camera_light
                 name: Camera light
+              - type: attribute
+                entity: camera.anycubic_kobra_x_camera
+                attribute: last_stream_state
+                name: Last stream state

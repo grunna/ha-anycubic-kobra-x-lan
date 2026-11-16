@@ -8,7 +8,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import data as data_helpers
 from .const import DOMAIN
+from .entity import (
+    AnycubicKobraXLanEntity,
+    async_add_per_box_entities,
+    box_key,
+    box_name,
+)
 from .coordinator import AnycubicKobraXLanCoordinator
 
 
@@ -20,6 +27,13 @@ async def async_setup_entry(
     coordinator: AnycubicKobraXLanCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     async_add_entities([AnycubicKobraXLanCameraStreamSwitch(coordinator, entry)])
+
+    async_add_per_box_entities(
+        coordinator,
+        entry,
+        async_add_entities,
+        lambda box_index: [AnycubicKobraXLanAutoFeedSwitch(coordinator, entry, box_index)],
+    )
 
 
 class AnycubicKobraXLanCameraStreamSwitch(
@@ -36,6 +50,8 @@ class AnycubicKobraXLanCameraStreamSwitch(
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_camera_stream"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = "camera_stream"
         self._attr_has_entity_name = True
         self._attr_name = "Camera stream"
         self._attr_device_info = {
@@ -76,6 +92,32 @@ class AnycubicKobraXLanCameraStreamSwitch(
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_camera_stream(False)
+
+
+class AnycubicKobraXLanAutoFeedSwitch(AnycubicKobraXLanEntity, SwitchEntity):
+    """Runout refill: continue from another slot with the same filament."""
+
+    _attr_icon = "mdi:autorenew"
+
+    def __init__(
+        self,
+        coordinator: AnycubicKobraXLanCoordinator,
+        entry: ConfigEntry,
+        box_index: int,
+    ) -> None:
+        super().__init__(coordinator, entry, box_key(box_index, "auto_feed"))
+        self._box_index = box_index
+        self._attr_name = box_name(box_index, "Runout auto refill")
+
+    @property
+    def is_on(self) -> bool | None:
+        return data_helpers.auto_feed(self.data, self._box_index)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_auto_feed(self._box_index, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_auto_feed(self._box_index, False)
 
 
 def _payload(data: dict[str, Any], query_type: str) -> dict[str, Any]:

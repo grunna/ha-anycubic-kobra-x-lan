@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.1
+
+### Fixed
+
+- Values froze while printing or streaming: every report the printer pushed on its own (progress, video, command replies) postponed the regular poll, so temperatures, layers and other polled values stopped updating. Pushed reports no longer reschedule the poll.
+- Camera stream cut itself off: until the printer confirmed `startCapture`, every new stream open (after 10 s) sent `stopCapture` + `startCapture` again and killed the running stream. A running or just requested capture is now left alone.
+- Camera relay waits for the first video data; if the printer sends none (or stops sending) the capture is restarted once automatically instead of leaving a black picture.
+- Printer card animation restarted (looked stuck) on every state update, e.g. each camera token change. The card now redraws only when something visible changes and resumes animations at the right phase.
+
+## 0.2.0
+
+### Added
+
+- Bundled Lovelace card `custom:kobra-x-printer-card` (views `printer`, `details`, `camera`), served and loaded by the integration.
+- Print event entity: started, paused, resumed, finished, stopped, failed, error (with reason code and text).
+- Pause reason sensor with names for Anycubic's reason/error codes.
+- Print preview and plate view image entities (job thumbnail via `file/fileDetails`).
+- Firmware version on the device page.
+- Printer card drawing redrawn after the real Kobra X: spool rack with four side-on spools, PTFE tubes into the ACE GEN2 head showing the loaded slot, X module, bed and touchscreen; the head and tubes move together while printing. `device` is optional.
+- Complete copy & paste dashboard with every entity (`dashboards/kobra_x_dashboard.yaml`, also in the README).
+- Every entity has a stable `translation_key`, so cards and automations can find it regardless of its name.
+
+## 0.1.3
+
+### Added
+
+- Print control buttons: pause, resume, cancel.
+- Print speed mode select, print speed and speed mode name sensors, estimated finish sensor, last print error sensor.
+- Binary sensors: printing, print paused, print complete, print failed, print cancelled, axis moving, LAN connection, drying.
+- Multi-color box (ACE): temperature and humidity sensors, drying start/stop buttons, drying temperature/duration settings, drying target/duration/remaining sensors, runout auto refill switch, retract filament button. Entities are created per box.
+- Axis: home all, home X/Y, home Z, disable motors, read position buttons and X/Y/Z position sensors (disabled by default).
+- Services `move_axis`, `start_drying` and `stop_drying`.
+- Target temperature and fan controls also work while idle (`tempature/set`, `fan/setSpeed`).
+- Camera entity is loaded again and plays the printer's HTTP-FLV stream.
+- Camera stream switch is loaded.
+- Camera card in the example dashboard.
+
+### Fixed
+
+- Polling no longer throws away state the printer pushed on its own (print progress, pause, drying, command replies); replies to commands are merged instead of replacing whole reports.
+- Camera staying idle with no picture after a printer or Home Assistant restart: `startCapture` is now sent whenever the stream is opened and after the LAN connection reconnects.
+- Kobra X `206 Partial Content` stream response is relayed as `200` so ffmpeg/go2rtc accept it.
+- Filament slot sensors and lights reported after setup (e.g. when the multi-color box report misses the first refresh after a printer reboot) are now added automatically instead of only after a reload.
+- MQTT connection now sends keepalive pings and reconnects when the printer stops answering (e.g. after a printer reboot).
+
 ## 0.1.2
 
 ### Fixed

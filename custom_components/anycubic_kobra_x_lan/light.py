@@ -8,7 +8,7 @@ from homeassistant.components.light import (
     LightEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -30,15 +30,32 @@ async def async_setup_entry(
 ) -> None:
     coordinator: AnycubicKobraXLanCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    light_types = _reported_light_types(coordinator.data or {})
+    known_types: set[int] = set()
 
-    if not light_types:
-        light_types = [3]
+    @callback
+    def _async_add_new_lights() -> None:
+        # Add lights the printer reports later (the light report can miss
+        # the first refresh), not only those known at setup.
+        light_types = _reported_light_types(coordinator.data or {})
 
-    async_add_entities(
-        AnycubicKobraXLanLight(coordinator, entry, light_type)
-        for light_type in light_types
-    )
+        if not light_types and not known_types:
+            light_types = [3]
+
+        new_types = [
+            light_type for light_type in light_types if light_type not in known_types
+        ]
+
+        if not new_types:
+            return
+
+        known_types.update(new_types)
+        async_add_entities(
+            AnycubicKobraXLanLight(coordinator, entry, light_type)
+            for light_type in new_types
+        )
+
+    _async_add_new_lights()
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_new_lights))
 
 
 class AnycubicKobraXLanLight(
@@ -59,6 +76,8 @@ class AnycubicKobraXLanLight(
         self._entry = entry
         self._light_type = light_type
         self._attr_unique_id = f"{entry.entry_id}_light_{light_type}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = f"light_{light_type}"
         self._attr_has_entity_name = True
         self._attr_name = LIGHT_NAMES.get(light_type, f"Light {light_type}")
         self._attr_device_info = {

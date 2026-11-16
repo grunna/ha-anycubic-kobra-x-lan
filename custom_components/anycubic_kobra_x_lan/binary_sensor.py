@@ -4,15 +4,19 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import data as data_helpers
 from .const import DOMAIN
+from .entity import async_add_per_box_entities, box_key, box_name
 from .coordinator import AnycubicKobraXLanCoordinator
 
 
@@ -33,6 +37,45 @@ BINARY_SENSORS: tuple[AnycubicBinarySensorEntityDescription, ...] = (
         key="usb_available",
         name="USB available",
         value_fn=lambda data: bool(_payload(data, "peripherie").get("usb")),
+    ),
+    AnycubicBinarySensorEntityDescription(
+        key="print_in_progress",
+        name="Printing",
+        device_class=BinarySensorDeviceClass.RUNNING,
+        value_fn=data_helpers.print_in_progress,
+    ),
+    AnycubicBinarySensorEntityDescription(
+        key="print_paused",
+        name="Print paused",
+        icon="mdi:pause-circle-outline",
+        value_fn=data_helpers.print_paused,
+    ),
+    AnycubicBinarySensorEntityDescription(
+        key="print_complete",
+        name="Print complete",
+        icon="mdi:check-circle-outline",
+        value_fn=data_helpers.print_complete,
+    ),
+    AnycubicBinarySensorEntityDescription(
+        key="print_failed",
+        name="Print failed",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=data_helpers.print_failed,
+        attr_fn=lambda data: {"error": data_helpers.last_print_error(data)},
+    ),
+    AnycubicBinarySensorEntityDescription(
+        key="print_cancelled",
+        name="Print cancelled",
+        icon="mdi:cancel",
+        value_fn=data_helpers.print_stopped,
+    ),
+    AnycubicBinarySensorEntityDescription(
+        key="axis_moving",
+        name="Axis moving",
+        device_class=BinarySensorDeviceClass.MOVING,
+        value_fn=lambda data: data_helpers.axis_move_state(data)
+        not in (None, "done", "failed"),
+        entity_registry_enabled_default=False,
     ),
     AnycubicBinarySensorEntityDescription(
         key="multi_color_box_available",
@@ -56,6 +99,26 @@ async def async_setup_entry(
         AnycubicKobraXLanBinarySensor(coordinator, entry, description)
         for description in BINARY_SENSORS
     )
+    async_add_entities([AnycubicKobraXLanConnectedSensor(coordinator, entry)])
+
+    async_add_per_box_entities(
+        coordinator,
+        entry,
+        async_add_entities,
+        lambda box_index: [
+            AnycubicKobraXLanBinarySensor(
+                coordinator,
+                entry,
+                AnycubicBinarySensorEntityDescription(
+                    key=box_key(box_index, "drying"),
+                    name=box_name(box_index, "Drying"),
+                    device_class=BinarySensorDeviceClass.HEAT,
+                    value_fn=lambda data: data_helpers.is_drying(data, box_index),
+                    attr_fn=lambda data: data_helpers.drying_status(data, box_index),
+                ),
+            )
+        ],
+    )
 
 
 class AnycubicKobraXLanBinarySensor(
@@ -74,6 +137,8 @@ class AnycubicKobraXLanBinarySensor(
         self.entity_description = description
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = description.key
         self._attr_has_entity_name = True
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},
@@ -97,6 +162,40 @@ class AnycubicKobraXLanBinarySensor(
 
         attributes = self.entity_description.attr_fn(self.coordinator.data)
         return attributes or None
+
+
+class AnycubicKobraXLanConnectedSensor(
+    CoordinatorEntity[AnycubicKobraXLanCoordinator],
+    BinarySensorEntity,
+):
+    """On while the LAN MQTT connection to the printer is up."""
+
+    _attr_has_entity_name = True
+    _attr_name = "LAN connection"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: AnycubicKobraXLanCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_lan_connection"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = "lan_connection"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},
+        }
+
+    @property
+    def available(self) -> bool:
+        # Must stay available to report the printer being offline.
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.last_update_success and self.coordinator.mqtt_connected
 
 
 def _camera_attributes(data: dict[str, Any]) -> dict[str, Any]:

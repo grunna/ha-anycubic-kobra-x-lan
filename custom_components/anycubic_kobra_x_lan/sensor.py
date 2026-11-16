@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
@@ -10,12 +11,22 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature, UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfLength,
+    UnitOfTemperature,
+    UnitOfTime,
+)
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from homeassistant.util import dt as dt_util
+
+from . import data as data_helpers
 from .const import DOMAIN
+from .entity import async_add_per_box_entities, box_key, box_name
 from .coordinator import AnycubicKobraXLanCoordinator
 
 
@@ -171,6 +182,52 @@ STATIC_SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
     ),
     AnycubicSensorEntityDescription(
+        key="print_speed_pct",
+        name="Print speed",
+        icon="mdi:speedometer",
+        value_fn=lambda data: data_helpers.print_settings(data).get("print_speed_pct"),
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_speed_mode_name",
+        name="Print speed mode name",
+        icon="mdi:speedometer-medium",
+        value_fn=lambda data: _speed_mode_name(data),
+    ),
+    AnycubicSensorEntityDescription(
+        key="estimated_finish",
+        name="Estimated finish",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data: _estimated_finish(data),
+    ),
+    AnycubicSensorEntityDescription(
+        key="print_reason",
+        name="Pause reason",
+        icon="mdi:alert-octagon-outline",
+        value_fn=lambda data: (data_helpers.print_reason(data) or {}).get("reason"),
+        attr_fn=lambda data: data_helpers.print_reason(data) or {},
+    ),
+    AnycubicSensorEntityDescription(
+        key="last_print_error",
+        name="Last print error",
+        icon="mdi:alert-circle-outline",
+        value_fn=data_helpers.last_print_error,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    *(
+        AnycubicSensorEntityDescription(
+            key=f"axis_position_{axis}",
+            name=f"Axis position {axis.upper()}",
+            icon="mdi:axis-arrow",
+            value_fn=lambda data, axis=axis: data_helpers.axis_coordinates(data).get(axis),
+            native_unit_of_measurement=UnitOfLength.MILLIMETERS,
+            state_class=SensorStateClass.MEASUREMENT,
+            entity_registry_enabled_default=False,
+        )
+        for axis in ("x", "y", "z")
+    ),
+    AnycubicSensorEntityDescription(
         key="task_id",
         name="Task ID",
         value_fn=lambda data: _project(data).get("task_id")
@@ -189,15 +246,112 @@ async def async_setup_entry(
 ) -> None:
     coordinator: AnycubicKobraXLanCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    descriptions = [
-        *STATIC_SENSORS,
-        *_slot_sensor_descriptions(coordinator.data or {}),
-    ]
-
     async_add_entities(
         AnycubicKobraXLanSensor(coordinator, entry, description)
-        for description in descriptions
+        for description in STATIC_SENSORS
     )
+
+    known_slots: set[str] = set()
+
+    @callback
+    def _async_add_new_slots() -> None:
+        # The multi-color box report often arrives after the first refresh
+        # (e.g. right after a printer reboot), so slot sensors are added
+        # whenever new slots show up instead of only at setup.
+        new_descriptions = [
+            description
+            for description in _slot_sensor_descriptions(coordinator.data or {})
+            if description.key not in known_slots
+        ]
+
+        if not new_descriptions:
+            return
+
+        known_slots.update(description.key for description in new_descriptions)
+        async_add_entities(
+            AnycubicKobraXLanSensor(coordinator, entry, description)
+            for description in new_descriptions
+        )
+
+    _async_add_new_slots()
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_new_slots))
+
+    async_add_per_box_entities(
+        coordinator,
+        entry,
+        async_add_entities,
+        lambda box_index: (
+            AnycubicKobraXLanSensor(coordinator, entry, description)
+            for description in _box_sensor_descriptions(box_index)
+        ),
+    )
+
+
+def _box_sensor_descriptions(
+    box_index: int,
+) -> tuple[AnycubicSensorEntityDescription, ...]:
+    return (
+        AnycubicSensorEntityDescription(
+            key=box_key(box_index, "box_temperature"),
+            name=box_name(box_index, "Multi color box temperature"),
+            value_fn=lambda data: data_helpers.multi_color_box(data, box_index).get("temp"),
+            device_class=SensorDeviceClass.TEMPERATURE,
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        AnycubicSensorEntityDescription(
+            key=box_key(box_index, "box_humidity"),
+            name=box_name(box_index, "Multi color box humidity"),
+            value_fn=lambda data: data_helpers.multi_color_box(data, box_index).get("humidity"),
+            device_class=SensorDeviceClass.HUMIDITY,
+            native_unit_of_measurement=PERCENTAGE,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        AnycubicSensorEntityDescription(
+            key=box_key(box_index, "drying_target_temperature"),
+            name=box_name(box_index, "Drying target temperature"),
+            value_fn=lambda data: data_helpers.drying_value(data, box_index, "target_temp"),
+            device_class=SensorDeviceClass.TEMPERATURE,
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        ),
+        AnycubicSensorEntityDescription(
+            key=box_key(box_index, "drying_duration"),
+            name=box_name(box_index, "Drying duration"),
+            value_fn=lambda data: data_helpers.drying_value(data, box_index, "duration"),
+            device_class=SensorDeviceClass.DURATION,
+            native_unit_of_measurement=UnitOfTime.MINUTES,
+        ),
+        AnycubicSensorEntityDescription(
+            key=box_key(box_index, "drying_remaining_time"),
+            name=box_name(box_index, "Drying remaining time"),
+            value_fn=lambda data: data_helpers.drying_value(data, box_index, "remain_time"),
+            device_class=SensorDeviceClass.DURATION,
+            native_unit_of_measurement=UnitOfTime.MINUTES,
+        ),
+    )
+
+
+def _speed_mode_name(data: dict[str, Any]) -> str | None:
+    mode = data_helpers.print_settings(data).get("print_speed_mode")
+
+    try:
+        return data_helpers.speed_modes(data).get(int(mode), str(mode))
+    except (TypeError, ValueError):
+        return None
+
+
+def _estimated_finish(data: dict[str, Any]) -> datetime | None:
+    if not data_helpers.print_in_progress(data):
+        return None
+
+    try:
+        remaining = int(_project(data).get("remain_time"))
+    except (TypeError, ValueError):
+        return None
+
+    # Round to the minute so the state does not change on every update.
+    finish = dt_util.utcnow() + timedelta(minutes=remaining)
+    return finish.replace(second=0, microsecond=0)
 
 
 class AnycubicKobraXLanSensor(
@@ -216,6 +370,8 @@ class AnycubicKobraXLanSensor(
         self.entity_description = description
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = description.key
         self._attr_has_entity_name = True
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},
