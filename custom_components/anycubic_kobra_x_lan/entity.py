@@ -26,6 +26,8 @@ class AnycubicKobraXLanEntity(CoordinatorEntity[AnycubicKobraXLanCoordinator]):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = key
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},
             "name": coordinator.credentials.get("modelName", "Anycubic Kobra X"),

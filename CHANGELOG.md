@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.0
+
+### Added
+
+- Bundled Lovelace card `custom:kobra-x-printer-card` (views `printer`, `details`, `camera`), served and loaded by the integration.
+- Print event entity: started, paused, resumed, finished, stopped, failed, error (with reason code and text).
+- Pause reason sensor with names for Anycubic's reason/error codes.
+- Print preview and plate view image entities (job thumbnail via `file/fileDetails`).
+- Firmware version on the device page.
+- Every entity has a stable `translation_key`, so cards and automations can find it regardless of its name.
+
 ## 0.1.3
 
 ### Added

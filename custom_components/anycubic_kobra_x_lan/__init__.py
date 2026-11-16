@@ -8,6 +8,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import AnycubicKobraXLanCoordinator
+from .frontend import async_register_frontend
 
 
 SERVICE_REFRESH_DATA = "refresh_data"
@@ -30,6 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     _async_register_services(hass)
+    await async_register_frontend(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

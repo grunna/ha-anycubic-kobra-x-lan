@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import socket
@@ -9,14 +11,17 @@ import struct
 import threading
 import time
 import uuid
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CAMERA_RESUME_WINDOW_SECONDS,
@@ -25,6 +30,13 @@ from .const import (
     CONF_POLLING_INTERVAL,
     DEFAULT_POLLING_INTERVAL,
     DOMAIN,
+    EVENT_ERROR,
+    EVENT_FAILED,
+    EVENT_FINISHED,
+    EVENT_PAUSED,
+    EVENT_RESUMED,
+    EVENT_STARTED,
+    EVENT_STOPPED,
     OPTIONAL_QUERY_TYPES,
     QUERY_TYPES,
 )
@@ -36,6 +48,18 @@ MOVE_TYPE_HOME = 2
 FEED_TYPE_RETRACT = 2
 DEFAULT_DRYING_TEMP = 45
 DEFAULT_DRYING_DURATION = 240
+# A decoded preview larger than this is a malfunction, not a picture.
+MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+
+# Phase change -> event fired by the print event entity.
+_PHASE_EVENTS = {
+    (data_helpers.PHASE_PAUSED, data_helpers.PHASE_PRINTING): EVENT_RESUMED,
+    (None, data_helpers.PHASE_PRINTING): EVENT_STARTED,
+    (None, data_helpers.PHASE_PAUSED): EVENT_PAUSED,
+    (None, data_helpers.PHASE_FINISHED): EVENT_FINISHED,
+    (None, data_helpers.PHASE_STOPPED): EVENT_STOPPED,
+    (None, data_helpers.PHASE_FAILED): EVENT_FAILED,
+}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +89,17 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._camera_start_lock = asyncio.Lock()
         self._camera_last_start = 0.0
         self._camera_last_requested = 0.0
+        # Renders of the running job, answered to a file/fileDetails request.
+        self.print_previews: dict[str, bytes] = {}
+        self.print_preview_filename: str | None = None
+        self.print_preview_updated: datetime | None = None
+        self._file_details_requested: str | None = None
+        # Print events.
+        self._job_phase: str | None = None
+        self._error_code: int | None = None
+        self._event_listeners: list[Callable[[str, dict[str, Any]], None]] = []
+        self._sw_version: str | None = None
+        self.async_add_listener(self._async_after_update)
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -494,6 +529,141 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._apply_report(new_data, report_type, payload)
         self.async_set_updated_data(new_data)
 
+    # ----- print preview -------------------------------------------------
+
+    def _apply_file_details(self, payload: dict[str, Any]) -> None:
+        report = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        details = report.get("file_details")
+
+        if not isinstance(details, dict):
+            return
+
+        filename = report.get("filename")
+        current = data_helpers.project(self.data or {}).get("filename")
+
+        if filename and current and filename != current:
+            # A late answer for the previous job.
+            return
+
+        previews: dict[str, bytes] = {}
+
+        for name, key in (("thumbnail", "thumbnail"), ("plate", "png_image")):
+            raw = _decode_image(details.get(key))
+
+            if raw is not None:
+                previews[name] = raw
+
+        if not previews:
+            return
+
+        self.print_previews = previews
+        self.print_preview_filename = filename or current
+        self.print_preview_updated = dt_util.utcnow()
+
+    @callback
+    def _async_request_file_details(self) -> None:
+        """Ask once per job for its thumbnail; the printer never pushes it."""
+        data = self.data or {}
+
+        if not data_helpers.print_in_progress(data):
+            return
+
+        filename = data_helpers.project(data).get("filename")
+
+        if not filename or filename == self._file_details_requested:
+            return
+
+        self._file_details_requested = filename
+        self.hass.async_create_task(self._async_send_file_details(str(filename)))
+
+    async def _async_send_file_details(self, filename: str) -> None:
+        try:
+            await self.async_send_command(
+                "file",
+                "fileDetails",
+                {"root": "local", "filename": filename, "plate_index": 1},
+                refresh=False,
+            )
+        except Exception as err:  # noqa: BLE001 - optional feature
+            _LOGGER.debug("fileDetails request failed: %s", err)
+
+    # ----- print events --------------------------------------------------
+
+    @callback
+    def async_add_event_listener(
+        self, listener: Callable[[str, dict[str, Any]], None]
+    ) -> CALLBACK_TYPE:
+        self._event_listeners.append(listener)
+
+        @callback
+        def _remove() -> None:
+            if listener in self._event_listeners:
+                self._event_listeners.remove(listener)
+
+        return _remove
+
+    @callback
+    def _fire_event(self, event_type: str, attributes: dict[str, Any]) -> None:
+        for listener in list(self._event_listeners):
+            listener(event_type, attributes)
+
+    @callback
+    def _async_after_update(self) -> None:
+        data = self.data or {}
+        self._async_request_file_details()
+        self._async_update_sw_version(data)
+
+        phase = data_helpers.job_phase(data)
+        previous = self._job_phase
+        self._job_phase = phase
+        reason = data_helpers.print_reason(data)
+        project = data_helpers.project(data)
+        attributes: dict[str, Any] = {
+            "task": project.get("filename") or project.get("name"),
+            "progress": project.get("progress"),
+        }
+
+        if reason:
+            attributes["reason_code"] = reason["code"]
+            attributes["reason"] = reason["reason"]
+
+            if not reason["by_user"] and reason["code"] != self._error_code:
+                self._error_code = reason["code"]
+                self._fire_event(EVENT_ERROR, attributes)
+        elif phase == data_helpers.PHASE_PRINTING:
+            self._error_code = None
+
+        if previous is None or previous == phase:
+            # Nothing seen before a restart counts as an event.
+            return
+
+        if phase == data_helpers.PHASE_IDLE:
+            return
+
+        event = _PHASE_EVENTS.get((previous, phase)) or _PHASE_EVENTS.get((None, phase))
+
+        if event == EVENT_STARTED and previous == data_helpers.PHASE_PAUSED:
+            event = EVENT_RESUMED
+
+        if event:
+            self._fire_event(event, attributes)
+
+    @callback
+    def _async_update_sw_version(self, data: dict[str, Any]) -> None:
+        version = data_helpers.payload(data, "info").get("version")
+
+        if not version or version == self._sw_version:
+            return
+
+        self._sw_version = str(version)
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(
+            identifiers={(DOMAIN, self.credentials["deviceId"])}
+        )
+
+        if device is not None and device.sw_version != self._sw_version:
+            registry.async_update_device(device.id, sw_version=self._sw_version)
+
     def _apply_report(
         self,
         data: dict[str, Any],
@@ -510,6 +680,9 @@ class AnycubicKobraXLanCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif report_type == "axis" and payload.get("action") == "move":
             # Move replies carry no coordinates; keep the last known position.
             data["axis_move"] = payload
+        elif report_type == "file":
+            # Large base64 renders: kept as bytes on the coordinator, never in data.
+            self._apply_file_details(payload)
         elif report_type in ("tempature", "fan"):
             # Replies to set commands may carry only the changed value.
             data[report_type] = _merge_report(data.get(report_type), payload)
@@ -1159,6 +1332,21 @@ def _report_type_from_topic_and_payload(
         return parts[-1]
 
     return "unknown"
+
+
+def _decode_image(value: Any) -> bytes | None:
+    if not isinstance(value, str) or not value:
+        return None
+
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+    if len(raw) > MAX_PREVIEW_BYTES:
+        return None
+
+    return raw
 
 
 def _decode_publish(body: bytes):

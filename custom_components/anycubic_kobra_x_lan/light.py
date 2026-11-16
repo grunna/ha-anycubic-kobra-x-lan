@@ -76,6 +76,8 @@ class AnycubicKobraXLanLight(
         self._entry = entry
         self._light_type = light_type
         self._attr_unique_id = f"{entry.entry_id}_light_{light_type}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = f"light_{light_type}"
         self._attr_has_entity_name = True
         self._attr_name = LIGHT_NAMES.get(light_type, f"Light {light_type}")
         self._attr_device_info = {

@@ -50,6 +50,8 @@ class AnycubicKobraXLanCameraStreamSwitch(
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_camera_stream"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = "camera_stream"
         self._attr_has_entity_name = True
         self._attr_name = "Camera stream"
         self._attr_device_info = {

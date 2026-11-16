@@ -9,6 +9,12 @@ views:
         cards:
           - type: heading
             heading: Anycubic Kobra X
+          - type: custom:kobra-x-printer-card
+            device: <device id of the printer>
+            view: printer
+          - type: custom:kobra-x-printer-card
+            device: <device id of the printer>
+            view: details
           - type: picture-entity
             entity: camera.anycubic_kobra_x_camera
             name: Kobra X

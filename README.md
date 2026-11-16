@@ -23,6 +23,11 @@ This integration is focused on local printer access. It does not require an Anyc
 - Camera entity (auto-starts the printer stream) and camera stream switch
 - Camera light control
 - Refresh data and reconnect buttons
+- **Print event** entity (`started`, `paused`, `resumed`, `finished`, `stopped`, `failed`, `error`) for notifications
+- **Pause reason** sensor: why the printer paused or stopped (e.g. *Filament is stuck*, *Spaghetti detected*)
+- **Print preview** and **plate view** images of the running job (requested from the printer with `file/fileDetails`)
+- Firmware version shown on the device page
+- **Kobra X printer card**: a bundled Lovelace card that draws the printer and its color unit with live values (see below)
 - Services: `move_axis`, `start_drying`, `stop_drying`, `refresh_data`, `reconnect`
 - Diagnostics support
 
@@ -39,6 +44,62 @@ report the value.
 - Filament loading, slot colour/material editing
 - AI detection settings (the printer only accepts these over the cloud)
 - Cloud account features
+
+## Kobra X printer card
+
+![Kobra X printer card](screenshots/kobra-x-printer-card.png)
+
+The integration ships a dashboard card and loads it automatically, no extra HACS resource is needed
+(after an update, reload the browser once). Add it from the card picker (search for **Kobra X**) or in YAML:
+
+```yaml
+type: custom:kobra-x-printer-card
+device: <device id of the printer>   # the card editor fills it in
+view: printer                        # printer | details | camera
+```
+
+- `view: printer` – the Kobra X drawn as one picture: the built-in 4-color unit on top with every spool in its
+  real filament colour and a ring for the remaining amount (the loaded spool pulses), expansion boxes above
+  it with humidity, temperature and drying state, the part growing on the bed in the filament colour, the X
+  gantry rising with the layers, the toolhead moving while printing, nozzle/bed/fan values, light and camera
+  toggles, job thumbnail, progress, layer, remaining time and finish time.
+- `view: details` – pause / resume / cancel with confirmation, light, camera, smart plug, print speed modes,
+  job preview, filament list per box with drying and auto refill controls, value tiles (nozzle, bed, fans,
+  job, health with pause reason and last error, connection, power).
+- `view: camera` – the live camera with status and temperatures on top.
+
+| Option | Default | Description |
+|---|---|---|
+| `device` | – | **Required.** The printer device |
+| `view` | `printer` | `printer`, `details` or `camera` |
+| `plug` | – | Smart plug of the printer, shown as a button with confirmation |
+| `power` | – | Power sensor of the plug |
+| `preview` | `true` | Show the job thumbnail |
+| `language` | `auto` | `auto`, `cs` or `en` |
+
+The card finds entities through the device and their stable keys, so renamed entities keep working.
+Idea and layout inspired by [ossilampe/bambu-printer-card](https://github.com/ossilampe/bambu-printer-card) (MIT).
+
+## Print events
+
+`event.<printer>_print_event` fires on every change of the job. Paused, stopped and `error` carry
+`reason_code` and `reason`; `error` fires once for a fault the user did not cause (clog, tangle, spaghetti).
+
+```yaml
+automation:
+  - alias: Printer needs attention
+    triggers:
+      - trigger: state
+        entity_id: event.anycubic_kobra_x_print_event
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.attributes.event_type in ['error', 'failed', 'finished'] }}"
+    actions:
+      - action: notify.mobile_app_your_phone
+        data:
+          title: "Kobra X: {{ trigger.to_state.attributes.event_type }}"
+          message: "{{ trigger.to_state.attributes.reason | default(trigger.to_state.attributes.task) }}"
+```
 
 ## Installation with HACS
 

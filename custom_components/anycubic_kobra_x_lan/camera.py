@@ -79,6 +79,8 @@ class AnycubicKobraXLanCamera(
         self._entry = entry
         self._stream_proxy_token = secrets.token_urlsafe(32)
         self._attr_unique_id = f"{entry.entry_id}_camera"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = "camera"
         self._attr_has_entity_name = True
         self._attr_name = "Camera"
         self._attr_device_info = {

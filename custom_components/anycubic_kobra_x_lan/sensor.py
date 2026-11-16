@@ -202,6 +202,13 @@ STATIC_SENSORS: tuple[AnycubicSensorEntityDescription, ...] = (
         value_fn=lambda data: _estimated_finish(data),
     ),
     AnycubicSensorEntityDescription(
+        key="print_reason",
+        name="Pause reason",
+        icon="mdi:alert-octagon-outline",
+        value_fn=lambda data: (data_helpers.print_reason(data) or {}).get("reason"),
+        attr_fn=lambda data: data_helpers.print_reason(data) or {},
+    ),
+    AnycubicSensorEntityDescription(
         key="last_print_error",
         name="Last print error",
         icon="mdi:alert-circle-outline",
@@ -363,6 +370,8 @@ class AnycubicKobraXLanSensor(
         self.entity_description = description
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        # Stable key so dashboards/cards can find the entity whatever its name.
+        self._attr_translation_key = description.key
         self._attr_has_entity_name = True
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.credentials["deviceId"])},

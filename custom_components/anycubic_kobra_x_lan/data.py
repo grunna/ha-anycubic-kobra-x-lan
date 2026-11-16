@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .const import REASON_TEXT, USER_REASON_CODES
+
 # Print report `state` values that mean a job is running.
 PRINT_STATES_ACTIVE = frozenset(
     {
@@ -269,3 +271,70 @@ def axis_move_state(data: dict[str, Any]) -> str | None:
 
     state = axis.get("state")
     return str(state) if state is not None else None
+
+
+# Job phases used for the print event entity.
+PHASE_IDLE = "idle"
+PHASE_PRINTING = "printing"
+PHASE_PAUSED = "paused"
+PHASE_FINISHED = "finished"
+PHASE_STOPPED = "stopped"
+PHASE_FAILED = "failed"
+
+
+def job_phase(data: dict[str, Any]) -> str:
+    """One word for where the job is, the order matters: a failed or stopped
+    report wins over the print_status code the info report still carries."""
+    if print_failed(data):
+        return PHASE_FAILED
+
+    if print_stopped(data):
+        return PHASE_STOPPED
+
+    if print_paused(data):
+        return PHASE_PAUSED
+
+    if print_in_progress(data):
+        return PHASE_PRINTING
+
+    if print_complete(data):
+        return PHASE_FINISHED
+
+    return PHASE_IDLE
+
+
+# `state` values of a print report that carry a pause or stop reason code.
+_REASON_STATES = PRINT_STATES_PAUSED | PRINT_STATES_STOPPED | PRINT_STATES_FAILED
+
+
+def print_reason(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Why the printer paused or stopped the job, from the print report envelope.
+
+    The printer puts a reason code next to the state (e.g. 10401 paused by
+    user, 11518 filament stuck). Progress pushes and command replies carry 200.
+    """
+    report = data.get("print")
+
+    if not isinstance(report, dict) or report.get("state") not in _REASON_STATES:
+        return None
+
+    code = report.get("code")
+
+    if isinstance(code, bool) or not isinstance(code, int) or code == 200:
+        return None
+
+    message = report.get("msg")
+    text = REASON_TEXT.get(code) or (
+        str(message) if isinstance(message, str) and message else f"Code {code}"
+    )
+    return {
+        "code": code,
+        "reason": text,
+        "by_user": code in USER_REASON_CODES,
+        "state": report.get("state"),
+    }
+
+
+def slot_loaded(slot: dict[str, Any]) -> bool:
+    """A slot reports status 5 while filament sits in it."""
+    return _int(slot.get("status")) == 5
